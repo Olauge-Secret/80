@@ -1,6 +1,6 @@
 # AI Agent Builder - Public API Developer Guide
 
-**Last Updated:** November 23, 2025  
+**Last Updated:** November 24, 2025  
 **API Base URL:** `https://agent-builder-agent-builder-dev-api.hf.space`
 
 ---
@@ -10,36 +10,36 @@
 1. [Overview](#overview)
 2. [Getting Started](#getting-started)
 3. [Authentication](#authentication)
-4. [Stake-Based Rate Limiting](#stake-based-rate-limiting)
+4. [Rate Limiting](#rate-limiting)
 5. [API Endpoints](#api-endpoints)
 6. [Workflow Export & Execution](#workflow-export--execution)
 7. [Code Examples](#code-examples)
-8. [Best Practices](#best-practices)
-9. [Troubleshooting](#troubleshooting)
 
 ---
 
 ## Overview
 
-The AI Agent Builder Public API allows developers to programmatically execute AI agent workflows designed in the Builder interface. This API uses **Bittensor wallet-based authentication** and **stake-based rate limiting** to ensure fair access to computational resources.
+The AI Agent Builder Public API allows developers to programmatically execute AI agent workflows designed in the Builder interface. This API uses **optional Bittensor wallet-based authentication** to ensure fair access to computational resources.
 
 ### Key Features
 
 - 🔐 **Secure Authentication**: Bittensor coldkey signature-based authentication
 - ⚖️ **Fair Access**: Proportional rate limiting based on alpha stake
 - 🚀 **High Performance**: Distributed miner network for scalable AI execution
-- 📊 **Graph Execution**: Execute complex multi-agent workflows
-- 🔄 **Async Processing**: Non-blocking async API design
-
+- 📊 **Graph Execution**: Execute complex multi-agent DAG workflows
 ---
 
 ## Getting Started
 
 ### Prerequisites
 
-1. **Bittensor Wallet**: You need a Bittensor wallet with a coldkey
-2. **Alpha Stake** (Optional): Stake alpha tokens in Subnet 80 for higher rate limits
-3. **Workflow JSON**: Export your workflow from the Builder interface
+**Minimum Requirements:**
+1. **Workflow JSON**: Export your workflow from the Builder interface (see "Export for API" button)
+2. **HTTP Client**: Any tool that can make POST requests (curl, Python requests, JavaScript fetch, etc.)
+
+**Optional (for higher rate limits):**
+1. **Bittensor Wallet**: A Bittensor wallet with a coldkey for authentication
+2. **Stake in Subnet 80**: Higher stake = higher rate limits 
 
 ### Installation
 
@@ -56,8 +56,6 @@ pip install bittensor requests
 ### How It Works
 
 Authentication uses **Bittensor coldkey signatures** to verify wallet ownership. This prevents unauthorized access and enables stake-based rate limiting.
-
-### Step 1: Sign a Message
 
 Use your Bittensor wallet to sign an authentication message:
 
@@ -103,41 +101,16 @@ def generate_signed_message(wallet_name: str, password: str) -> dict:
 # Usage
 auth_data = generate_signed_message("my_wallet", "my_password")
 print(f"Coldkey: {auth_data['coldkey']}")
-print(f"Signed Message: {auth_data['signed_message'][:100]}...")
-```
-
-### Step 2: Include in API Requests
-
-Add the signed message to your HTTP request headers:
-
-```python
-import requests
-
-headers = {
-    "X-Signed-Message": auth_data["signed_message"],
-    "Content-Type": "application/json"
-}
-
-response = requests.get(
-    "https://agent-builder-agent-builder-dev-api.hf.space/health",
-    headers=headers
-)
+print(f"Signed Message: {auth_data['signed_message']}")
 ```
 
 ---
 
-## Stake-Based Rate Limiting
+## Rate Limiting
 
 ### Overview
 
 The API uses a **proportional stake-based rate limiting system** to fairly allocate computational resources among users.
-
-### How It Works
-
-1. **Total System Capacity**: 90 requests per minute (RPM)
-2. **Your Share**: Calculated proportionally based on your alpha stake
-3. **Formula**: `Your RPM = (Your Stake / Total Active Stake) × 90 RPM`
-4. **Minimum Guarantee**: 1 RPM even with 0 stake
 
 ### Important Disclaimers
 
@@ -167,7 +140,10 @@ def check_rate_limit(signed_message: str, coldkey: str) -> dict:
     Returns:
         Dictionary with RPM allocation and stake info
     """
-    headers = {"X-Signed-Message": signed_message}
+    headers = {
+        "X-Signed-Message": signed_message,
+        "X-Coldkey": coldkey
+    }
     
     response = requests.get(
         f"https://agent-builder-agent-builder-dev-api.hf.space/stake/check-rpm",
@@ -179,649 +155,437 @@ def check_rate_limit(signed_message: str, coldkey: str) -> dict:
 
 # Usage
 rate_info = check_rate_limit(auth_data["signed_message"], auth_data["coldkey"])
-print(f"Your RPM: {rate_info['rpm']}")
-print(f"Your Stake: {rate_info['stake']} alpha")
-print(f"Stake Ratio: {rate_info['stake_ratio']:.2%}")
-```
-
-### Rate Limit Response Example
-
-```json
-{
-  "rpm": 15,
-  "stake": 1000.5,
-  "total_active_stake": 5000.0,
-  "stake_ratio": 0.20,
-  "max_system_rpm": 90,
-  "description": "Your RPM is calculated based on your proportional stake"
-}
+print(f"Your RPM Limit: {rate_info['rate_limit']['rpm_limit']}")
+print(f"Requests Remaining: {rate_info['rate_limit']['requests_remaining']}")
+print(f"Your Stake: {rate_info['stake_amount_tao']} Alpha")
 ```
 
 ### Increasing Your Rate Limit
 
-To increase your rate limit:
+To get higher rate limits:
 
-1. **Stake More Alpha**: Increase your stake in Subnet 80
-2. **Wait for Refresh**: Stake info is cached for 5 minutes
-3. **Verify**: Check your new RPM allocation
+1. **Authenticate**: Add `X-Signed-Message` and `X-Coldkey` headers
+2. **Increase Stake**: Stake more tokens in Subnet 80 (via Bittensor network)
+3. **Wait for Cache**: Stake info refreshes every 5 minutes
+4. **Verify**: Check your new allocation with `/stake/check-rpm`
 
-**Note**: Staking is done through the Bittensor network, not through this API.
+**Note**: Staking happens on Bittensor network, not through this API.
 
 ---
 
 ## API Endpoints
 
+### Base URL
+
+```
+https://agent-builder-agent-builder-dev-api.hf.space
+```
+
 ### Public Endpoints (No Authentication Required)
 
 #### Health Check
 
-```
+```http
 GET /health
 ```
 
-Check if the API service is operational.
+Check if the API gateway is operational.
 
 **Response:**
 ```json
 {
   "status": "healthy",
-  "timestamp": "2025-11-23T17:00:00Z",
-  "version": "1.0.0"
+  "service": "agent-builder-proxy-gateway"
 }
 ```
 
-### Protected Endpoints (Authentication Required)
+### Workflow Endpoints
 
-All endpoints below require the `X-Signed-Message` header.
+#### Execute Workflow (Main Endpoint)
 
-#### Execute Workflow
-
-```
-POST /execute
+```http
+POST /orchestrate/execute
 ```
 
-Execute an AI agent workflow from exported JSON.
+Execute an AI agent workflow using the DAG orchestration system.
+
+**Authentication:** Optional (adds `X-Signed-Message` and `X-Coldkey` headers for higher rate limits)
 
 **Request Body:**
 ```json
 {
   "workflow": {
-    "name": "My Workflow",
-    "version": "1.0",
-    "nodes": [...],
-    "edges": [...],
-    "config": {...}
+    "workflow_id": "workflow_1732468800000",
+    "nodes": [
+      {
+        "id": "node_1",
+        "type": "user",
+        "user_query": "Write a blog post about AI",
+        "dependencies": []
+      },
+      {
+        "id": "node_2",
+        "type": "component",
+        "component": "complete",
+        "coldkey": "5GrwvaEF...",
+        "task": "Write a blog post",
+        "use_conversation_history": true,
+        "use_playbook": true,
+        "dependencies": ["node_1"]
+      }
+    ]
   },
-  "input": {
-    "user_message": "Hello, AI agents!"
-  }
+  "cid": "conv_1732468800000"
 }
+```
+
+**Request Headers (Optional):**
+```http
+Content-Type: application/json
+X-Signed-Message: message<separate>Signed by: 5GrwvaEF...<separate>Signature: 0x1234...
+X-Coldkey: 5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY
 ```
 
 **Response:**
 ```json
 {
-  "request_id": "req_abc123",
-  "status": "completed",
-  "output": {
-    "response": "AI agent response...",
-    "execution_time": 2.5,
-    "tokens_used": 150
+  "success": true,
+  "workflow_id": "workflow_1764001649914",
+  "cid": "conv_1764001649913_test",
+  "node_results": {
+    "node_1764001643979": {
+      "node_id": "node_1764001643979",
+      "success": true,
+      "result": {
+        "type": "user",
+        "user_query": "Hello"
+      },
+      "error": null,
+      "execution_time_ms": 0
+    },
+    "node_1764001645577": {
+      "node_id": "node_1764001645577",
+      "success": true,
+      "result": {
+        "cid": "conv_1764001649913_test",
+        "task": "Generate a comprehensive and helpful response",
+        "input": [{"user_query": "Hello"}],
+        "output": {
+          "immediate_response": "Hello! How can I help you today?",
+          "notebook": "no update"
+        },
+        "component": "complete"
+      },
+      "error": null,
+      "execution_time_ms": 2487
+    }
   },
-  "metadata": {
-    "miner_hotkey": "5Abc...",
-    "execution_path": ["agent1", "agent2"]
-  }
-}
-```
-
-#### List Available Miners
-
-```
-GET /miners
-```
-
-Get list of available AI miners in the network.
-
-**Response:**
-```json
-{
-  "miners": [
+  "end_node_outputs": [
     {
-      "hotkey": "5Abc...",
-      "coldkey": "5Def...",
-      "stake": 1000.0,
-      "trust": 0.95,
-      "incentive": 0.05,
-      "status": "active"
+      "node_id": "node_1764001645577",
+      "node_type": "component",
+      "result": {
+        "cid": "conv_1764001649913_test",
+        "task": "Generate a comprehensive and helpful response",
+        "input": [{"user_query": "Hello"}],
+        "output": {
+          "immediate_response": "Hello! How can I help you today?",
+          "notebook": "no update"
+        },
+        "component": "complete"
+      },
+      "output": {
+        "immediate_response": "Hello! How can I help you today?",
+        "notebook": "no update"
+      },
+      "task": "Generate a comprehensive and helpful response",
+      "component": "complete"
     }
   ],
-  "total": 25,
-  "active": 23
+  "total_execution_time_ms": 2488,
+  "levels_executed": 2,
+  "nodes_executed": 2,
+  "error": null
 }
 ```
 
----
+**Response Structure Explained:**
+
+- `success` (boolean) - Whether the workflow executed successfully
+- `workflow_id` (string) - The workflow identifier that was executed
+- `cid` (string) - Conversation ID used for this execution
+- `node_results` (object) - Detailed results for each node by node ID
+  - Contains `success`, `result`, `error`, and `execution_time_ms` for each node
+- `end_node_outputs` (array) - **Primary output** - Array of final node results
+  - Each end node contains:
+    - `node_id` - The node identifier
+    - `output` - **The AI response** with `immediate_response` and `notebook`
+    - `result` - Full execution details including `task`, `input`, `component`
+- `total_execution_time_ms` (number) - Total workflow execution time in milliseconds
+- `levels_executed` (number) - Number of DAG levels executed
+- `nodes_executed` (number) - Total number of nodes executed
+- `error` (string|null) - Error message if workflow failed
+
+**Getting the AI Response:**
+
+The actual AI-generated response is in: `end_node_outputs[i].output.immediate_response`
+
+```python
+result = response.json()
+for end_node in result["end_node_outputs"]:
+    ai_response = end_node["output"]["immediate_response"]
+    print(ai_response)
+```
+
+### Rate Limit Endpoints
+
+#### Check RPM for Coldkey
+
+```http
+GET /stake/check-rpm?coldkey=5GrwvaEF...
+```
+
+Check the rate limit allocation for a specific coldkey based on stake.
+
+**Query Parameters:**
+- `coldkey` (required): Bittensor coldkey SS58 address
+
+**Authentication Headers (Optional):**
+```http
+X-Signed-Message: message<separate>Signed by: 5GrwvaEF...<separate>Signature: 0x1234...
+X-Coldkey: 5GrwvaEF...
+```
+
+**Response:**
+```json
+{
+  "coldkey": "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
+  "is_miner": false,
+  "stake_amount_tao": 300,
+  "rate_limit": {
+    "rpm_limit": 90,
+    "requests_used_last_minute": 0,
+    "requests_remaining": 90
+  },
+  "rate_limiting_info": {
+    "type": "stake-based",
+    "description": "Your RPM is calculated based on your proportional stake"
+  }
+}
+```
 
 ## Workflow Export & Execution
 
-### Step 1: Design Your Workflow
+### Quick Start
 
-1. Open the **Builder** page in the UI
-2. Drag and drop agents to create your workflow
-3. Connect agents with edges to define execution flow
-4. Configure each agent's parameters
+1. **Design** your workflow in the Builder UI (drag nodes, connect edges)
+2. Click **"Export for API"** button (generates ready-to-use JSON)
+3. **Customize** the exported file (update `user_query`)
+4. **POST** the file directly to `/orchestrate/execute`
 
-### Step 2: Export Workflow
+### Export Format
 
-Click the **"Export"** button to download your workflow as JSON:
+The "Export for API" button generates a clean, minimal JSON payload ready to POST:
 
 ```json
 {
-  "name": "Customer Support Agent",
-  "version": "1.0",
-  "nodes": [
-    {
-      "id": "node_1",
-      "type": "llm",
-      "data": {
-        "label": "Greeting Agent",
-        "system_prompt": "You are a friendly customer support agent...",
-        "model": "gpt-3.5-turbo",
-        "temperature": 0.7
+  "workflow": {
+    "workflow_id": "workflow_1732468800000",
+    "nodes": [
+      {
+        "id": "node_1",
+        "type": "user",
+        "user_query": "Replace with your actual question",
+        "dependencies": []
       },
-      "position": {"x": 100, "y": 100}
-    },
-    {
-      "id": "node_2",
-      "type": "llm",
-      "data": {
-        "label": "Technical Support",
-        "system_prompt": "You are a technical support specialist...",
-        "model": "gpt-4",
-        "temperature": 0.3
-      },
-      "position": {"x": 300, "y": 100}
-    }
-  ],
-  "edges": [
-    {
-      "id": "edge_1",
-      "source": "node_1",
-      "target": "node_2",
-      "type": "default"
-    }
-  ],
-  "config": {
-    "max_iterations": 5,
-    "timeout": 30
-  }
+      {
+        "id": "node_2",
+        "type": "component",
+        "component": "complete",
+        "coldkey": "5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY",
+        "task": "Your task instructions here",
+        "use_conversation_history": true,
+        "use_playbook": true,
+        "dependencies": ["node_1"]
+      }
+    ]
+  },
+  "cid": "conv_1732468800000"
 }
 ```
 
-### Step 3: Execute via API
+**Required Fields:**
+- `workflow.workflow_id` (string) - Unique workflow identifier
+- `workflow.nodes` (array) - List of nodes to execute
+- `cid` (string) - Conversation ID for tracking
 
-```python
-import requests
-import json
+**Optional Fields in nodes:**
+- `edges` (array) - Optional edge definitions (can use `dependencies` in nodes instead)
+- `timeout` (number) - Per-node timeout in seconds (default: 30)
+- `notebook` (string) - For `type: "notebook"` nodes
+- `user_query` (string) - For `type: "user"` nodes
+- `component` (string) - For `type: "component"` nodes: `complete`, `refine`, `feedback`, `internet_search`, `summary`, `aggregate`
+- `coldkey` (string) - Required for component nodes
+- `task` (string) - Required for component nodes
+- `use_conversation_history` (boolean) - Include chat history (default: true)
+- `use_playbook` (boolean) - Use miner's learned patterns (default: true)
 
-def execute_workflow(signed_message: str, workflow_json: dict, user_input: str) -> dict:
-    """
-    Execute an exported workflow via API.
-    
-    Args:
-        signed_message: Your signed authentication message
-        workflow_json: Exported workflow JSON from Builder
-        user_input: User's input message
-    
-    Returns:
-        Execution result with AI response
-    """
-    headers = {
-        "X-Signed-Message": signed_message,
-        "Content-Type": "application/json"
-    }
-    
-    payload = {
-        "workflow": workflow_json,
-        "input": {
-            "user_message": user_input
-        }
-    }
-    
-    response = requests.post(
-        "https://agent-builder-agent-builder-dev-api.hf.space/execute",
-        headers=headers,
-        json=payload,
-        timeout=60
-    )
-    
-    return response.json()
+### Complete Payload Structure Reference
 
-# Load exported workflow
-with open("my_workflow.json", "r") as f:
-    workflow = json.load(f)
-
-# Execute
-result = execute_workflow(
-    auth_data["signed_message"],
-    workflow,
-    "I need help with my account"
-)
-
-print(f"Response: {result['output']['response']}")
+```json
+{
+  "workflow": {
+    "workflow_id": "string",
+    "nodes": [
+      {
+        "id": "string",
+        "type": "user | notebook | component",
+        "dependencies": ["node_id_array"],
+        
+        "user_query": "string (for type: user)",
+        "notebook": "string (for type: notebook)",
+        
+        "component": "complete | refine | feedback | internet_search | summary | aggregate",
+        "coldkey": "string (required for component)",
+        "task": "string (required for component)",
+        "use_conversation_history": true,
+        "use_playbook": true,
+        "timeout": 30
+      }
+    ],
+    "edges": [
+      {
+        "source": "node_id",
+        "target": "node_id"
+      }
+    ]
+  },
+  "cid": "string"
+}
 ```
 
----
+**Node Type Reference:**
+
+| Type | Required Fields | Optional Fields | Description |
+|------|----------------|-----------------|-------------|
+| `user` | `id`, `type`, `user_query`, `dependencies` | `timeout` | User input node |
+| `notebook` | `id`, `type`, `notebook`, `dependencies` | `timeout` | Code/document context |
+| `component` | `id`, `type`, `component`, `coldkey`, `task`, `dependencies` | `use_conversation_history`, `use_playbook`, `timeout` | AI processing node |
+
+**Component Types:**
+- `complete` - Generate AI completions
+- `refine` - Improve/polish existing content
+- `feedback` - Provide critiques and suggestions
+- `internet_search` - Perform web searches
+- `summary` - Summarize content
+- `aggregate` - Combine multiple inputs
 
 ## Code Examples
 
-### Complete Example: End-to-End Workflow Execution
+### Example 1: Simple Execution
 
 ```python
-#!/usr/bin/env python3
-"""
-Complete example: Authenticate, check rate limit, and execute workflow.
-"""
-
-import bittensor as bt
 import requests
 import json
-from binascii import hexlify
-import time
 
-class AgentBuilderClient:
-    """Client for AI Agent Builder Public API."""
-    
-    def __init__(self, wallet_name: str, password: str):
-        """
-        Initialize client with Bittensor wallet.
-        
-        Args:
-            wallet_name: Your Bittensor wallet name
-            password: Wallet password
-        """
-        self.base_url = "https://agent-builder-agent-builder-dev-api.hf.space"
-        self.wallet_name = wallet_name
-        self.password = password
-        self.signed_message = None
-        self.coldkey = None
-        
-        # Authenticate
-        self._authenticate()
-    
-    def _authenticate(self):
-        """Generate signed authentication message."""
-        wallet = bt.wallet(name=self.wallet_name)
-        wallet.coldkey_file.save_password_to_env(self.password)
-        wallet.unlock_coldkey()
-        
-        message = "agent-builder-proxy-auth"
-        signature = wallet.coldkey.sign(message.encode())
-        signature_hex = hexlify(signature).decode()
-        
-        self.coldkey = wallet.coldkey.ss58_address
-        self.signed_message = f"{message}<separate>Signed by: {self.coldkey}<separate>Signature: {signature_hex}"
-        
-        print(f"✅ Authenticated with coldkey: {self.coldkey[:20]}...{self.coldkey[-10:]}")
-    
-    def _get_headers(self):
-        """Get request headers with authentication."""
-        return {
-            "X-Signed-Message": self.signed_message,
-            "Content-Type": "application/json"
-        }
-    
-    def check_rate_limit(self):
-        """Check current rate limit allocation."""
-        response = requests.get(
-            f"{self.base_url}/stake/check-rpm",
-            params={"coldkey": self.coldkey},
-            headers=self._get_headers()
-        )
-        response.raise_for_status()
-        return response.json()
-    
-    def execute_workflow(self, workflow: dict, user_input: str):
-        """
-        Execute a workflow.
-        
-        Args:
-            workflow: Workflow JSON exported from Builder
-            user_input: User's input message
-        
-        Returns:
-            Execution result
-        """
-        payload = {
-            "workflow": workflow,
-            "input": {
-                "user_message": user_input
-            }
-        }
-        
-        response = requests.post(
-            f"{self.base_url}/execute",
-            headers=self._get_headers(),
-            json=payload,
-            timeout=60
-        )
-        response.raise_for_status()
-        return response.json()
-    
-    def list_miners(self):
-        """Get list of available miners."""
-        response = requests.get(
-            f"{self.base_url}/miners",
-            headers=self._get_headers()
-        )
-        response.raise_for_status()
-        return response.json()
+payload = {
+  "workflow": {
+    "workflow_id": "workflow_1764001649914",
+    "nodes": [
+      {
+        "id": "node_1764001643979",
+        "type": "user",
+        "dependencies": [],
+        "user_query": "Hello"
+      },
+      {
+        "id": "node_1764001645577",
+        "type": "component",
+        "dependencies": [
+          "node_1764001643979"
+        ],
+        "component": "complete",
+        "coldkey": "5Hata2bXMw44DtDxRcL6wTY44AZcsezh2UeAZiEm6yBkGHc9",
+        "task": "Generate a comprehensive and helpful response based on the user input",
+        "use_conversation_history": True,
+        "use_playbook": True
+      }
+    ]
+  },
+  "cid": "conv_1764001649913_test"
+}
 
+# POST the workflow payload
+response = requests.post(
+    "https://agent-builder-agent-builder-dev-api.hf.space/orchestrate/execute",
+    headers={"Content-Type": "application/json"},
+    json=payload,
+    timeout=180
+)
 
-# Usage Example
-if __name__ == "__main__":
-    # Initialize client
-    client = AgentBuilderClient("my_wallet", "my_password")
-    
-    # Check rate limit
-    rate_info = client.check_rate_limit()
-    print(f"Your RPM: {rate_info['rpm']}")
-    print(f"Your Stake: {rate_info['stake']} alpha")
-    
-    # Load workflow
-    with open("my_workflow.json", "r") as f:
-        workflow = json.load(f)
-    
-    # Execute workflow
-    result = client.execute_workflow(workflow, "Hello, I need assistance!")
-    print(f"Response: {result['output']['response']}")
-    print(f"Execution Time: {result['output']['execution_time']}s")
+result = response.json()
+
+# Access the final output from end nodes
+for end_node in result["end_node_outputs"]:
+    if "output" in end_node and "immediate_response" in end_node["output"]:
+        print("AI Response:", end_node["output"]["immediate_response"])
 ```
 
-### Error Handling Example
+### Example 2: With Authentication
 
 ```python
 import requests
-from requests.exceptions import HTTPError, Timeout
+import json
 
-def execute_with_retry(client, workflow, user_input, max_retries=3):
-    """
-    Execute workflow with retry logic.
-    
-    Args:
-        client: AgentBuilderClient instance
-        workflow: Workflow JSON
-        user_input: User input
-        max_retries: Maximum retry attempts
-    
-    Returns:
-        Execution result or None
-    """
-    for attempt in range(max_retries):
-        try:
-            result = client.execute_workflow(workflow, user_input)
-            return result
-        
-        except HTTPError as e:
-            if e.response.status_code == 429:
-                # Rate limit exceeded
-                print(f"⚠️ Rate limit exceeded. Waiting 60s...")
-                time.sleep(60)
-            elif e.response.status_code == 401:
-                # Authentication failed
-                print(f"❌ Authentication failed. Check your wallet signature.")
-                return None
-            else:
-                print(f"❌ HTTP Error: {e}")
-                return None
-        
-        except Timeout:
-            print(f"⏱️ Timeout on attempt {attempt + 1}/{max_retries}")
-            if attempt < max_retries - 1:
-                time.sleep(5 * (attempt + 1))  # Exponential backoff
-        
-        except Exception as e:
-            print(f"❌ Unexpected error: {e}")
-            return None
-    
-    print(f"❌ Failed after {max_retries} attempts")
-    return None
-```
+# Get signed_message from generate_signed_message() function (see Authentication section)
+# Format: "message<separate>Signed by: coldkey<separate>Signature: signature_hex"
+SIGNED_MESSAGE = "agent-builder-proxy-auth<separate>Signed by: 5GrwvaEF...<separate>Signature: 0x1234..."
+COLDKEY = "5GrwvaEF..."
 
----
-
-## Best Practices
-
-### Security
-
-1. **Never Share Your Wallet**: Keep your wallet password and private keys secure
-2. **Rotate Signatures**: Generate new signatures periodically (they don't expire but can be revoked)
-3. **Use HTTPS**: Always use the HTTPS endpoint
-4. **Validate Responses**: Always check response status codes and validate JSON
-
-### Performance
-
-1. **Cache Workflows**: Don't reload workflow JSON on every request
-2. **Reuse Signatures**: Generate signature once, reuse for multiple requests
-3. **Handle Rate Limits**: Implement exponential backoff when rate limited
-4. **Set Timeouts**: Always set request timeouts (recommended: 60s)
-
-### Rate Limiting
-
-1. **Monitor Usage**: Track your RPM usage to avoid hitting limits
-2. **Batch Requests**: Group related requests when possible
-3. **Implement Queuing**: Queue requests locally if you exceed your RPM
-4. **Consider Staking**: Increase your alpha stake for higher limits
-
-### Error Handling
-
-1. **Handle All HTTP Errors**: 401 (auth), 429 (rate limit), 500 (server error)
-2. **Implement Retries**: Use exponential backoff for transient errors
-3. **Log Failures**: Log all errors for debugging
-4. **Graceful Degradation**: Have fallback behavior when API is unavailable
-
----
-
-## Troubleshooting
-
-### Common Issues
-
-#### 401 Unauthorized
-
-**Problem**: Authentication failed
-
-**Solutions**:
-- Verify your wallet name and password are correct
-- Ensure wallet is unlocked: `wallet.unlock_coldkey()`
-- Check signature format: Must be `message<separate>Signed by: coldkey<separate>Signature: hex`
-- Regenerate signature if old
-
-#### 429 Too Many Requests
-
-**Problem**: Rate limit exceeded
-
-**Solutions**:
-- Check your RPM allocation: `GET /stake/check-rpm`
-- Wait 60 seconds before retrying
-- Increase your alpha stake for higher limits
-- Implement request queuing
-
-#### 500 Internal Server Error
-
-**Problem**: Server-side error
-
-**Solutions**:
-- Check API status: `GET /health`
-- Retry with exponential backoff
-- Verify workflow JSON is valid
-- Report persistent errors to support
-
-#### Workflow Execution Timeout
-
-**Problem**: Workflow takes too long to execute
-
-**Solutions**:
-- Simplify workflow (reduce number of agents)
-- Reduce `max_iterations` in workflow config
-- Break complex workflows into smaller parts
-
-### Getting Help
-
-**⚠️ SECURITY NOTICE:**
-- Do NOT share your wallet private keys
-- Do NOT share your signed messages publicly
-- Do NOT include sensitive data in workflow prompts
-
-For support:
-1. Check the [API Documentation](https://agent-builder-agent-builder-dev-api.hf.space/docs)
-2. Review workflow JSON for errors
-3. Check API health endpoint
-4. Contact support with:
-   - Error message (sanitized)
-   - Timestamp
-   - Your coldkey (public address only)
-   - Workflow structure (without sensitive data)
-
----
-
-## API Limits & Fair Use
-
-### Rate Limits
-
-- **Base Rate**: 1 RPM (no stake)
-- **Maximum Rate**: 90 RPM (proportional to stake)
-- **Refresh Interval**: 1 minute rolling window
-- **Burst Allowance**: 2x RPM for 10 seconds
-
-### Request Limits
-
-- **Max Request Size**: 10 MB
-- **Max Workflow Nodes**: 20 agents per workflow
-- **Max Execution Time**: 60 seconds
-- **Max Tokens per Request**: 4000 tokens
-
-### Fair Use Policy
-
-This API is for **research and development purposes only**:
-
-✅ **Allowed**:
-- Testing AI agent workflows
-- Building proof-of-concept applications
-- Educational and research projects
-- Personal development tools
-
-❌ **Not Allowed**:
-- High-volume production applications
-- Reselling API access
-- Automated scraping or data mining
-- Malicious or abusive behavior
-
-Violations may result in access revocation.
-
----
-
-## Appendix
-
-### Workflow JSON Schema
-
-```json
-{
-  "name": "string (required)",
-  "version": "string (required)",
-  "nodes": [
-    {
-      "id": "string (required)",
-      "type": "llm | tool | condition (required)",
-      "data": {
-        "label": "string",
-        "system_prompt": "string",
-        "model": "string",
-        "temperature": "number (0-2)",
-        "max_tokens": "number"
+payload = {
+  "workflow": {
+    "workflow_id": "workflow_1764001649914",
+    "nodes": [
+      {
+        "id": "node_1764001643979",
+        "type": "user",
+        "dependencies": [],
+        "user_query": "Hello"
       },
-      "position": {
-        "x": "number",
-        "y": "number"
+      {
+        "id": "node_1764001645577",
+        "type": "component",
+        "dependencies": [
+          "node_1764001643979"
+        ],
+        "component": "complete",
+        "coldkey": "5Hata2bXMw44DtDxRcL6wTY44AZcsezh2UeAZiEm6yBkGHc9",
+        "task": "Generate a comprehensive and helpful response based on the user input",
+        "use_conversation_history": True,
+        "use_playbook": True
       }
-    }
-  ],
-  "edges": [
-    {
-      "id": "string (required)",
-      "source": "string (node id, required)",
-      "target": "string (node id, required)",
-      "type": "default | conditional"
-    }
-  ],
-  "config": {
-    "max_iterations": "number (default: 5)",
-    "timeout": "number (seconds, default: 30)"
-  }
+    ]
+  },
+  "cid": "conv_1764001649913_test"
 }
+
+response = requests.post(
+    "https://agent-builder-agent-builder-dev-api.hf.space/orchestrate/execute",
+    headers={
+        "Content-Type": "application/json",
+        "X-Signed-Message": SIGNED_MESSAGE,  # Full signed message, not just signature
+        "X-Coldkey": COLDKEY
+    },
+    json=payload,
+    timeout=180
+)
+
+result = response.json()
+# Get the AI response from the end node
+for end_node in result["end_node_outputs"]:
+    if "output" in end_node:
+        print("AI Response:", end_node["output"]["immediate_response"])
 ```
 
-### Response Status Codes
-
-| Code | Meaning | Action |
-|------|---------|--------|
-| 200 | Success | Process response |
-| 401 | Unauthorized | Check authentication |
-| 429 | Rate Limited | Wait and retry |
-| 500 | Server Error | Retry with backoff |
-| 503 | Service Unavailable | Check /health endpoint |
-
-### Supported Models
-
-- `gpt-4` - Best quality, slower
-- `gpt-3.5-turbo` - Balanced performance
-- `claude-2` - Anthropic Claude (when available)
-- Model availability depends on miner network
-
----
-
-## Legal & Disclaimers
-
-### Terms of Use
-
-By using this API, you agree to:
-
-1. Use the API for research and development only
-2. Not abuse or circumvent rate limits
-3. Not use for illegal or harmful purposes
-4. Comply with all applicable laws and regulations
-
-### Staking Disclaimers
-
-**IMPORTANT - READ CAREFULLY:**
-
-- Staking alpha tokens is **NOT** a financial investment or purchase transaction
-- You **retain full ownership** of your staked tokens at all times
-- Token values **can fluctuate** - prices may go up or down
-- We make **NO GUARANTEES** about profits, returns, or asset values
-- This is a **computational resource allocation mechanism**, not an investment product
-- You are **solely responsible** for your staking decisions and their consequences
-- Staking involves blockchain risks including smart contract risks, network risks, and market volatility
-- **Consult a financial advisor** before making any staking decisions
-- This documentation is **NOT financial or investment advice**
-
-### Liability Limitations
-
-- API provided "AS IS" without warranties
-- No guarantee of availability, accuracy, or performance
-- Not liable for data loss, damages, or losses from API use
-- AI outputs may be inaccurate - always verify critical information
-- Users responsible for compliance with applicable laws
-
-### Data & Privacy
-
-- We do NOT store your workflow prompts or AI responses
-- Authentication uses cryptographic signatures (no passwords stored)
-- Requests are routed to third-party miners who may log data
-- Do NOT send sensitive or confidential information through the API
-
----
-
-**Version:** 1.0.0  
-**Last Updated:** November 23, 2025  
-**API Status:** https://agent-builder-agent-builder-dev-api.hf.space/health
+**Version:** 2.0.0  
+**Last Updated:** November 24, 2025
