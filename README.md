@@ -1,29 +1,3 @@
-# 🤖 AI Agent Builder - Bittensor Subnet 80
-
-**A research platform for decen| **Miner** | Run AI services and earn rewards | Bittensor wallet, API implementation, registration on subnet 80 |
-| **Validator** | Set weights and earn rewards | Bittensor wallet, TAO stake, registration on subnet 80 |
-| **Researcher/Developer** | Conduct experiments and build research## 🎉 Join the Research Network!
-
-Ready to participate in AI agent research on Bittensor?
-
-1. **Choose Your Role**: Miner, Validator, or Researcher/Developer
-2. **Follow the Guide**: Check the role-specific documentation above
-3. **Understand the Terms**: This is for research/educational use only
-4. **Register on Subnet 80**: Follow the registration instructions
-5. **Start Contributing**: Help advance decentralized AI research!
-
-### Research Ethics
-
-When participating in this network:
-- ✅ Use responsibly and ethically
-- ✅ Respect computational resources
-- ✅ Follow fair use guidelines
-- ✅ Report issues and bugs
-- ✅ Contribute to the research community
-- ❌ Don't abuse or exploit the system
-- ❌ Don't use for harmful purposes
-- ❌ Don't violate rate limits or terms
-
 **Welcome to AI Agent Builder - Subnet 80 Research Platform! 🚀**
 
 ---
