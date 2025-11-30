@@ -22,11 +22,10 @@
 
 ## Overview
 
-Welcome to **Bittensor Subnet 80** - a research platform for decentralized AI agent networks where miners compete by providing high-quality conversational AI agents. This subnet evaluates miners based on **three key factors**:
+Welcome to **Bittensor Subnet 80** - a research platform for decentralized AI agent networks where miners compete by providing high-quality conversational AI agents. This subnet evaluates miners based on **two key factors**:
 
-1. **Performance Quality** - How accurately your agent answers questions (evaluated automatically)
-2. **Validator Trust** - How much TAO validators delegate to your miner (reflects validator confidence)
-3. **Usage Activity** - How many real users interact with your agent (edges per minute)
+1. **Performance Quality** - How accurately your agent answers questions (evaluated automatically with temperature-based scoring)
+2. **Usage Activity** - How many real users interact with your agent (edges per minute)
 
 This document explains how to set up, register, and optimize your miner for research participation.
 
@@ -55,7 +54,7 @@ This document explains how to set up, register, and optimize your miner for rese
 - **Unified API Interface**: All miners expose the same REST API endpoints
 - **Orchestration System**: Validators route user requests to miners and aggregate results
 - **Continuous Evaluation**: Automated testing ensures quality across the network
-- **Dynamic Rewards**: Emissions adjust based on performance, stake, and usage
+- **Dynamic Rewards**: Emissions adjust based on performance and usage
 
 ---
 
@@ -162,7 +161,7 @@ Example:
 
 ### Rolling Window System
 
-- **Window Size**: 120 evaluations (configurable)
+- **Window Size**: 256 evaluations (configurable)
 - **Persistence**: Scores saved to disk and survive restarts
 - **Continuous Updates**: New evaluations replace oldest ones in the window
 - **Fair Comparison**: All miners evaluated on same questions simultaneously
@@ -179,80 +178,72 @@ Example:
 - ❌ **Timeout**: If your API doesn't respond within 60s → Score = 0 for that question
 - ❌ **Error**: If your API returns an error → Score = 0
 - ❌ **Wrong Answer**: If answer doesn't match expected → Score = 0
-- ⚠️ **Below Threshold**: If performance < 50% → **Stake score zeroed** (see Emission Mechanism)
 
 ---
 
 ## Emission Mechanism
 
-TAO emissions are distributed based on a **three-component weighted formula**:
+TAO emissions are distributed based on a **two-component weighted formula**:
 
 ### The Emission Formula
 
 ```
-Final Weight = 0.5 × (Old Scores) + 0.5 × (EPM Score)
+Final Weight = 0.5 × Performance Score + 0.5 × EPM Score
 
-Where:
-  Old Scores = 0.8 × Performance Score + 0.2 × Trust Score
-  
-Therefore:
-  Final Weight = 0.5 × (0.8 × Performance + 0.2 × Trust) + 0.5 × EPM
-  
 Simplified:
-  Final Weight = 0.40 × Performance + 0.10 × Trust + 0.50 × EPM
+  Final Weight = 50% Performance + 50% EPM
 ```
 
-> **Note**: "Trust Score" refers to TAO delegated TO your miner by validators, not staked BY you.
+### Performance Score Calculation (with Temperature)
+
+Performance scores use a **temperature-based transformation** to adjust sensitivity:
+
+```
+Raw Performance = (Correct Answers / Total Evaluations) × 100
+
+Transformed Performance = (Raw Performance / 100) ^ temperature × 100
+
+Where:
+  - temperature is a tunable parameter (typically 0.5 to 2.0)
+  - Higher temperature = more sensitive to performance differences
+  - Lower temperature = flatter distribution
+
+Final Performance Score = Max Normalization across all miners
+```
+
+**Example with temperature = 1.0**:
+```
+Raw Accuracy: 87%
+Transformed: (87/100)^1.0 × 100 = 87.0
+After max normalization: (87.0 / max_score) × 100
+```
 
 ### Component Breakdown
 
-#### 1. Performance Score (40% weight)
-- **What**: Your accuracy on evaluation questions
-- **Range**: 0-100%
-- **Calculation**: `(Correct Answers / Total Evaluations) × 100`
-- **Update**: After every evaluation
-- **Impact**: **HIGHEST** - Good performance is essential
-
-**Example**:
-```
-Correct: 90/100 evaluations
-Performance Score: 90.0%
-Contribution to weight: 0.40 × 90 = 36 points
-```
-
-#### 2. Trust Score (10% weight)
-- **What**: Normalized TAO delegated TO your miner by validators
+#### 1. Performance Score (50% weight)
+- **What**: Your accuracy on evaluation questions (with temperature transformation)
 - **Range**: 0-100
-- **Calculation**: `(TAO Delegated to You / Max Delegated) × 100`
-- **Update**: Every time metagraph syncs
-- **Impact**: Low weight, but helps differentiate miners with similar performance
-- **Note**: You do NOT stake to the subnet. Validators delegate trust TO you.
+- **Calculation**: 
+  1. Raw accuracy: `(Correct Answers / Total Evaluations) × 100`
+  2. Temperature transform: `(accuracy/100)^temperature × 100`
+  3. Max normalization: `(your_score / highest_score) × 100`
+- **Update**: After every evaluation
+- **Impact**: **CRITICAL** - 50% of your weight
 
-**Important**: Trust is **ZEROED** if performance < 50%:
+**Example (temperature = 1.0)**:
 ```
-if Performance Score < 50%:
-    Effective Trust = 0  (trust ignored)
-else:
-    Effective Trust = Delegated TAO to Your Miner
-```
-
-**Example**:
-```
-TAO Delegated to Your Miner: 100 TAO (from validators)
-Max Delegated in Network: 500 TAO
-Performance: 87% (above 50% threshold)
-Trust Score: (100/500) × 100 = 20.0
-Contribution to weight: 0.10 × 20 = 2 points
+Correct: 87/100 evaluations
+Raw Performance: 87.0%
+Transformed: (87/100)^1.0 × 100 = 87.0
+After max normalization: (87.0 / 92.0) × 100 = 94.57
+Contribution to weight: 0.50 × 94.57 = 47.29 points
 ```
 
-> **Important**: Miners do NOT stake TAO to the subnet themselves. Validators delegate TAO to miners they trust. You only need to register your hotkey on the subnet.
-
-#### 3. EPM Score (50% weight)
-- **What**: Edges Per Minute - your usage from real users
+#### 2. EPM Score (50% weight) your usage from real users
 - **Range**: 0-100
 - **Calculation**: `(Your EPM / Max EPM) × 100`
 - **Update**: Continuous (exponential moving average)
-- **Impact**: **HIGHEST** - Rewards miners serving real users
+- **Impact**: **CRITICAL** - 50% of your weight
 
 **EPM Calculation**:
 - **Outside EPM**: Only counts non-evaluation requests (real user traffic)
@@ -269,45 +260,34 @@ Contribution to weight: 0.50 × 50 = 25 points
 
 ### Complete Example
 
-**Scenario**: Your miner's performance
+**Scenario**: Your miner's performance (assuming temperature = 1.0)
 
-| Component | Your Value | Max Value | Score | Weight | Contribution |
-|-----------|------------|-----------|-------|--------|--------------|
-| Performance | 87/100 correct | 100% | 87.0 | 40% | 34.8 |
-| Trust | 100 TAO delegated | 500 TAO | 20.0 | 10% | 2.0 |
-| EPM | 15 req/min | 30 req/min | 50.0 | 50% | 25.0 |
-| **Total** | | | | | **61.8** |
+| Component | Your Value | Max Value | Raw Score | Normalized | Weight | Contribution |
+|-----------|------------|-----------|-----------|------------|--------|--------------||
+| Performance | 87/100 correct | 92% best | 87.0 | 94.57 | 50% | 47.29 |
+| EPM | 15 req/min | 30 req/min | 50.0 | 50.0 | 50% | 25.0 |
+| **Total** | | | | | | **72.29** |
 
-Your final weight: **61.8/100**
+Your final weight: **72.29/100**
 
-### Performance Threshold (Critical!)
 
-```
-⚠️ PERFORMANCE THRESHOLD: 50%
-
-If your Performance Score < 50%:
-  → Trust Score = 0 (delegated TAO ignored in calculations)
-  → Only Performance + EPM contribute to weight
-  → Significantly reduced weight allocation
-  
-Stay above 50% to maintain trust benefits!
-```
 
 ### Weight Setting Process
 
-1. **Scoring Service** calculates all three scores for each miner
-2. **Combined scores** computed using the formula above
-3. **Validator** sets weights on Bittensor blockchain every 60 seconds
-4. **Bittensor** distributes TAO emissions proportionally to weights
-5. **Your rewards** = (Your Weight / Total Weights) × Subnet Emissions
+1. **Scoring Service** calculates both performance and EPM scores for each miner
+2. **Performance scores** are transformed using temperature and max-normalized
+3. **Combined scores** computed: 0.5 × Performance + 0.5 × EPM
+4. **Validator** sets weights on Bittensor blockchain every 60 seconds
+5. **Bittensor** distributes TAO emissions proportionally to weights
+6. **Your rewards** = (Your Weight / Total Weights) × Subnet Emissions
 
-### How to Maximize Earnings
+### How to Maximize Weight
 
 | Priority | Action | Impact |
 |----------|--------|--------|
-| 🔴 **CRITICAL** | Keep performance > 50% | Prevents trust score from being zeroed |
+| 🔴 **CRITICAL** | Maximize accuracy | 50% of your weight (with temperature amplification!) |
 | 🔴 **CRITICAL** | Maximize EPM (real users) | 50% of your weight! |
-| 🟡 **IMPORTANT** | Improve accuracy to 80%+ | Strong performance advantage |
+| 🟡 **IMPORTANT** | Aim for 90%+ accuracy | Temperature transform amplifies high performance |
 | 🟢 **HELPFUL** | Fast response times | Better user experience → more usage |
 
 ---
@@ -328,7 +308,7 @@ Before you can participate as a miner on Subnet 80, you need:
    btcli subnet register --netuid 80 --wallet.name miner --wallet.hotkey default
    ```
    
-   > **Note**: Registration requires a small TAO fee (recycled). You do NOT stake TAO as a miner. Validators delegate trust to you.
+   > **Note**: Registration requires a small TAO fee (recycled). You do NOT need to stake TAO as a miner.
 
 2. **LLM Backend**: Choose one:
    - **OpenAI API** (easiest, recommended for beginners)
@@ -684,10 +664,9 @@ Your coldkey should appear in the list.
 **🌐 https://agentbuilder80.com/index.html#/monitor**
 
 This dashboard shows:
-- 📊 **Performance Scores**: Your accuracy on evaluations
-- 💎 **Stake Scores**: Your normalized stake ranking
+- 📊 **Performance Scores**: Your accuracy on evaluations (temperature-transformed and normalized)
 - ⚡ **EPM Scores**: Your usage metrics (edges per minute)
-- 🏆 **Combined Weights**: Your final weight for emissions
+- 🏆 **Combined Weights**: Your final weight for emissions (50% performance + 50% EPM)
 - 📈 **Rankings**: Your position compared to other miners
 
 ### Understanding Your Metrics
@@ -722,16 +701,14 @@ Last Updated: 2025-11-24 10:30:00
 ```
 Rank: 3
 Coldkey: 5F3sa2TJA...
-Performance: 86.67
-Trust: 22.45
+Performance: 94.57 (normalized)
 EPM: 41.50
-Combined: 64.72
+Combined: 68.04
 ```
 
 **Combined Weight Breakdown**:
 ```
-64.72 = 0.40 × 86.67 (performance)
-      + 0.10 × 22.45 (trust from validators)
+68.04 = 0.50 × 94.57 (performance, temperature-transformed & normalized)
       + 0.50 × 41.50 (EPM)
 ```
 ---
@@ -740,7 +717,13 @@ Combined: 64.72
 
 ### 1. Improve Performance Score
 
-**Priority: CRITICAL** (40% of weight + needed for stake)
+**Priority: CRITICAL** (50% of weight with temperature amplification)
+
+#### Understanding Temperature Transform:
+The temperature parameter amplifies performance differences:
+- High performers get boosted more
+- Small accuracy improvements have big impact at high levels
+- Example: 90% vs 95% accuracy creates larger score gap than 60% vs 65%
 
 #### Accuracy Tips:
 - ✅ Use a high-quality LLM (GPT-4, Claude, or fine-tuned models)
@@ -798,7 +781,7 @@ max_tokens = 500  # Enough for most responses, limits cost
 ### General Questions
 
 **Q: What is Subnet 80?**  
-A: A Bittensor subnet for conversational AI agents. Miners provide agent APIs, validators evaluate quality, and TAO emissions are distributed based on performance, stake, and usage.
+A: A Bittensor subnet for conversational AI agents. Miners provide agent APIs, validators evaluate quality, and TAO emissions are distributed based on performance and usage (50/50 split).
 
 **Q: What rewards can I receive?**  
 A: Reward allocation depends on your weight (performance + trust + EPM) relative to other miners in the research network. **IMPORTANT**: There are NO guarantees of rewards, earnings, or profitability. This is an experimental research platform with variable and unpredictable outcomes. Participation may result in net costs. This is NOT financial advice.
@@ -829,8 +812,8 @@ A: Common reasons:
 
 ### Reward Allocation Questions
 
-**Q: Why is my trust score 0?**  
-A: Your performance score is below 50%. Improve accuracy to restore trust benefits. Remember: you don't stake TAO as a miner; validators delegate trust to you.
+**Q: How does temperature affect my performance score?**  
+A: Temperature transforms your raw accuracy: `(accuracy/100)^temperature × 100`. With temperature > 1.0, high performance is amplified more. The transformed scores are then max-normalized across all miners. Focus on maximizing accuracy!
 
 **Q: How can I increase EPM?**  
 A: Attract real users by:
@@ -871,11 +854,11 @@ A: 4GB minimum, 8GB recommended for OpenAI API version. More if self-hosting LLM
 A: Yes, but each needs a separate wallet, API endpoint, and API key.
 
 **Q: Should I focus on performance or EPM first?**  
-A: **Performance first** (get above 50%), then EPM. Without good performance, trust delegations from validators won't benefit you.
+A: Both are equally important (50/50 split). However, **start with performance** since temperature transformation amplifies high accuracy. Once you have 80%+ accuracy, focus on attracting users for EPM.
 
 ### Key Success Factors
 
-1. **Performance > 50%** (Critical - enables trust benefits)
+1. **High Performance** (50% of weight - aim for 90%+ with temperature boost)
 2. **High EPM** (50% of weight - attract users!)
 3. **Reliability** (high uptime target)
 4. **Fast Responses** (< 3 seconds ideal)
@@ -897,13 +880,6 @@ A: **Performance first** (get above 50%), then EPM. Without good performance, tr
 - **POTENTIAL LOSSES**: You may incur net costs from infrastructure, API fees, and computational resources
 - **CONSULT PROFESSIONALS**: Consult appropriate financial, legal, and tax professionals before participating
 - **YOUR RESPONSIBILITY**: You are solely responsible for understanding risks and making informed decisions
-
-### Miner Staking Clarification
-- **Miners do NOT stake TAO to the subnet**
-- You only register your hotkey (small registration fee)
-- **Validators delegate TAO TO miners** they trust
-- You have no control over validator delegation decisions
-- Delegation amounts can change at any time
 
 ### Technical Risks
 - Network instability and downtime

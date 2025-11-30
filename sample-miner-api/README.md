@@ -299,7 +299,7 @@ Once your miner is running and tested, register it with the orchestration system
 
 ### Registration Portal
 
-**🌐 https://huggingface.co/spaces/star145s/miner-registration**
+**🌐 https://huggingface.co/spaces/agent-builder/miner-registration-system**
 
 ### Step-by-Step Registration
 
