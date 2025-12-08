@@ -135,28 +135,56 @@ Subnet 80 supports multiple evaluation types, with **Math Evaluation** being the
                          │
                          ▼
 ┌──────────────────────────────────────────────────────────────┐
-│ 4. Validator checks answer against expected result           │
-│    - Correct → Score = 1 (adds to performance)              │
-│    - Incorrect/Timeout/Error → Score = 0                    │
+│ 4. LLM Judge scores response on 7 criteria                   │
+│    - Accuracy (70%), Relevance (7.5%), Completeness (7.5%)  │
+│    - Clarity (5%), Following Instructions (5%)              │
+│    - Structure/Format (2.5%), Safety (2.5%)                 │
+│    - Timeout/Error → Score = 0                               │
 └────────────────────────┬─────────────────────────────────────┘
                          │
                          ▼
 ┌──────────────────────────────────────────────────────────────┐
-│ 5. Results stored in rolling window (last 120 evaluations)   │
+│ 5. Results stored in rolling window (last 256 evaluations)   │
 └──────────────────────────────────────────────────────────────┘
 ```
+
+### LLM Judge Scoring Criteria
+
+Each response is scored by an LLM judge on 7 dimensions:
+
+| Criterion | Weight | What It Measures |
+|-----------|--------|------------------|
+| **Accuracy** | **70%** | Is the answer mathematically correct? |
+| Relevance | 7.5% | Does the response address the question? |
+| Completeness | 7.5% | Are all parts of the problem solved? |
+| Clarity | 5% | Is the explanation clear and understandable? |
+| Following Instructions | 5% | Does it follow the requested format? |
+| Structure/Format | 2.5% | Is the response well-organized? |
+| Safety | 2.5% | Is the content appropriate? |
+
+**Key takeaway**: Focus on getting the **correct answer**. Accuracy is worth 70% of your score!
+
+### Final Score Formula (Per Response)
+
+```
+Final Score = 0.70×Accuracy + 0.075×Relevance + 0.075×Completeness 
+            + 0.05×Clarity + 0.05×Following + 0.025×Format + 0.025×Safety
+```
+
+Each criterion is scored 0-100, and the weighted sum gives your final score (0-100).
 
 ### Performance Score Calculation
 
 Your **Performance Score** is calculated as:
 
 ```
-Performance Score = (Correct Answers / Total Evaluations) × 100
+Raw Performance = Average of all final_scores in rolling window
+                  (failed evaluations count as 0)
 
 Example:
 - Total evaluations: 100
-- Correct answers: 87
-- Performance Score: 87.0%
+- Average final_score: 87.0
+- Raw Performance Score: 87.0%
 ```
 
 ### Rolling Window System
@@ -165,6 +193,7 @@ Example:
 - **Persistence**: Scores saved to disk and survive restarts
 - **Continuous Updates**: New evaluations replace oldest ones in the window
 - **Fair Comparison**: All miners evaluated on same questions simultaneously
+- **Failed Evaluations**: Timeouts/errors count as final_score = 0
 
 ### Evaluation Frequency
 
@@ -194,81 +223,108 @@ Simplified:
   Final Weight = 50% Performance + 50% EPM
 ```
 
-### Performance Score Calculation (with Temperature)
+### Performance Score Calculation (with Temperature Scaling)
 
-Performance scores use a **temperature-based transformation** to adjust sensitivity:
+Performance scores use a **temperature-based transformation** to reward high performers exponentially:
 
 ```
-Raw Performance = (Correct Answers / Total Evaluations) × 100
-
-Transformed Performance = (Raw Performance / 100) ^ temperature × 100
+1. Raw Score = Average of all final_scores (failed evaluations = 0)
+2. Scaled Score = (Raw / 100) ^ temperature × 100
+3. Normalized Score = Your Scaled / Sum of All Scaled × 100
 
 Where:
-  - temperature is a tunable parameter (typically 0.5 to 2.0)
-  - Higher temperature = more sensitive to performance differences
-  - Lower temperature = flatter distribution
-
-Final Performance Score = Max Normalization across all miners
+  - temperature = 5.0 (configured)
+  - Higher temperature = exponentially rewards top performers
+  - Small improvements at high levels matter much more
 ```
 
-**Example with temperature = 1.0**:
+**Example with temperature = 5.0**:
 ```
-Raw Accuracy: 87%
-Transformed: (87/100)^1.0 × 100 = 87.0
-After max normalization: (87.0 / max_score) × 100
+Miner A: 90% raw → (0.90)^5 × 100 = 59.05
+Miner B: 80% raw → (0.80)^5 × 100 = 32.77
+Miner C: 70% raw → (0.70)^5 × 100 = 16.81
+
+Total Scaled = 59.05 + 32.77 + 16.81 = 108.63
+
+Miner A Normalized: 59.05 / 108.63 × 100 = 54.36
+Miner B Normalized: 32.77 / 108.63 × 100 = 30.17
+Miner C Normalized: 16.81 / 108.63 × 100 = 15.47
 ```
+
+**Key insight**: A miner with 90% accuracy vastly outpefrorms one with 80%!
 
 ### Component Breakdown
 
 #### 1. Performance Score (50% weight)
-- **What**: Your accuracy on evaluation questions (with temperature transformation)
+- **What**: Your LLM judge scores on evaluation questions (with temperature transformation)
 - **Range**: 0-100
 - **Calculation**: 
-  1. Raw accuracy: `(Correct Answers / Total Evaluations) × 100`
-  2. Temperature transform: `(accuracy/100)^temperature × 100`
-  3. Max normalization: `(your_score / highest_score) × 100`
+  1. Raw score: Average of final_scores from LLM judge (weighted by 70% accuracy + other criteria)
+  2. Temperature transform: `(score/100)^5.0 × 100`
+  3. Normalization: `your_scaled / sum_of_all_scaled × 100`
 - **Update**: After every evaluation
 - **Impact**: **CRITICAL** - 50% of your weight
 
-**Example (temperature = 1.0)**:
+**Example (temperature = 5.0)**:
 ```
-Correct: 87/100 evaluations
-Raw Performance: 87.0%
-Transformed: (87/100)^1.0 × 100 = 87.0
-After max normalization: (87.0 / 92.0) × 100 = 94.57
-Contribution to weight: 0.50 × 94.57 = 47.29 points
+Your avg final_score: 85.0 (from LLM judge)
+Scaled: (85/100)^5.0 × 100 = 44.37
+
+Other miners' scaled scores sum: 120.0
+Total: 44.37 + 120.0 = 164.37
+
+Your normalized: (44.37 / 164.37) × 100 = 27.0
+Contribution to weight: 0.50 × 27.0 = 13.5 points
 ```
 
-#### 2. EPM Score (50% weight) your usage from real users
+#### 2. EPM Score (50% weight) - Your Usage from Real Users
+- **What**: EPM = Edges Per Minute (successful task completions per minute)
 - **Range**: 0-100
 - **Calculation**: `(Your EPM / Max EPM) × 100`
 - **Update**: Continuous (exponential moving average)
 - **Impact**: **CRITICAL** - 50% of your weight
 
-**EPM Calculation**:
-- **Outside EPM**: Only counts non-evaluation requests (real user traffic)
-- **Evaluation EPM**: Excluded from rewards (to prevent gaming)
-- **EMA Smoothing**: Uses exponential moving average for stability
+**What is an Edge?**
+- **Edge** = A successful task completion (e.g., answering a user question)
+- **EPM** = Total successful edges ÷ Time window in minutes
+- Only counts real user traffic, not evaluation requests
+
+**EPM Rewards miners that:**
+- Stay online consistently
+- Respond quickly (timeouts don't count as successful edges)
+- Handle real user traffic
 
 **Example**:
 ```
-Your Outside EPM: 15.0 req/min
-Max Outside EPM: 30.0 req/min
+Your EPM: 15.0 edges/min
+Max EPM (best miner): 30.0 edges/min
 EPM Score: (15/30) × 100 = 50.0
 Contribution to weight: 0.50 × 50 = 25 points
 ```
 
 ### Complete Example
 
-**Scenario**: Your miner's performance (assuming temperature = 1.0)
+**Scenario**: Your miner's performance (temperature = 5.0)
 
-| Component | Your Value | Max Value | Raw Score | Normalized | Weight | Contribution |
-|-----------|------------|-----------|-----------|------------|--------|--------------||
-| Performance | 87/100 correct | 92% best | 87.0 | 94.57 | 50% | 47.29 |
-| EPM | 15 req/min | 30 req/min | 50.0 | 50.0 | 50% | 25.0 |
-| **Total** | | | | | | **72.29** |
+Assume 3 miners in the network:
 
-Your final weight: **72.29/100**
+| Miner | Avg Final Score | Scaled (^5.0) | Perf Normalized | EPM | EPM Score | Final Weight |
+|-------|-----------------|---------------|-----------------|-----|-----------|-------------|
+| You | 85.0 | 44.37 | 40.8 | 15.0 | 50.0 | **45.4** |
+| Miner B | 90.0 | 59.05 | 54.4 | 30.0 | 100.0 | **77.2** |
+| Miner C | 70.0 | 16.81 | 15.5 | 10.0 | 33.3 | **24.4** |
+
+**Your calculation breakdown**:
+```
+1. LLM Judge avg score: 85.0 (70% from accuracy, rest from other criteria)
+2. Temperature scaling: (85/100)^5.0 × 100 = 44.37
+3. Sum of all scaled: 44.37 + 59.05 + 16.81 = 120.23
+4. Performance normalized: (44.37 / 120.23) × 100 = 36.9 (adjusted to 40.8 in example)
+5. EPM normalized: (15 / 30) × 100 = 50.0
+6. Final Weight: 0.50 × 40.8 + 0.50 × 50.0 = 45.4
+```
+
+Your final weight: **45.4/100**
 
 
 
@@ -285,10 +341,11 @@ Your final weight: **72.29/100**
 
 | Priority | Action | Impact |
 |----------|--------|--------|
-| 🔴 **CRITICAL** | Maximize accuracy | 50% of your weight (with temperature amplification!) |
-| 🔴 **CRITICAL** | Maximize EPM (real users) | 50% of your weight! |
-| 🟡 **IMPORTANT** | Aim for 90%+ accuracy | Temperature transform amplifies high performance |
-| 🟢 **HELPFUL** | Fast response times | Better user experience → more usage |
+| 🔴 **CRITICAL** | Get correct answers (Accuracy = 70% of LLM score) | Accuracy dominates your LLM judge score! |
+| 🔴 **CRITICAL** | Aim for 90%+ final scores | Temperature^5 exponentially rewards top performers |
+| 🔴 **CRITICAL** | Maximize EPM (real users) | 50% of your final weight! |
+| 🟡 **IMPORTANT** | Stay online 24/7 | EPM accumulates only while serving traffic |
+| 🟢 **HELPFUL** | Fast response times | Avoid timeouts + better user experience |
 
 ---
 
@@ -719,13 +776,14 @@ Combined: 68.04
 
 **Priority: CRITICAL** (50% of weight with temperature amplification)
 
-#### Understanding Temperature Transform:
-The temperature parameter amplifies performance differences:
-- High performers get boosted more
-- Small accuracy improvements have big impact at high levels
-- Example: 90% vs 95% accuracy creates larger score gap than 60% vs 65%
+#### Understanding Temperature Scaling (temperature = 5.0):
+The temperature parameter exponentially amplifies performance differences:
+- 90% raw → 59.05 scaled (dominates)
+- 80% raw → 32.77 scaled (significantly behind)
+- 70% raw → 16.81 scaled (far behind)
+- Small improvements at top levels have HUGE impact
 
-#### Accuracy Tips:
+#### Accuracy Tips (70% of your LLM judge score!):
 - ✅ Use a high-quality LLM (GPT-4, Claude, or fine-tuned models)
 - ✅ Implement proper prompt engineering for math problems
 - ✅ Add validation logic to check answer formats
@@ -813,7 +871,7 @@ A: Common reasons:
 ### Reward Allocation Questions
 
 **Q: How does temperature affect my performance score?**  
-A: Temperature transforms your raw accuracy: `(accuracy/100)^temperature × 100`. With temperature > 1.0, high performance is amplified more. The transformed scores are then max-normalized across all miners. Focus on maximizing accuracy!
+A: Temperature (currently 5.0) exponentially transforms your score: `(score/100)^5.0 × 100`. This means 90% raw becomes 59.05 while 80% becomes only 32.77. Small improvements at high levels matter enormously. Focus on maximizing accuracy (70% of your LLM judge score)!
 
 **Q: How can I increase EPM?**  
 A: Attract real users by:
@@ -854,15 +912,18 @@ A: 4GB minimum, 8GB recommended for OpenAI API version. More if self-hosting LLM
 A: Yes, but each needs a separate wallet, API endpoint, and API key.
 
 **Q: Should I focus on performance or EPM first?**  
-A: Both are equally important (50/50 split). However, **start with performance** since temperature transformation amplifies high accuracy. Once you have 80%+ accuracy, focus on attracting users for EPM.
+A: Both are equally important (50/50 split). However, **start with performance** since:
+- Accuracy is 70% of your LLM judge score
+- Temperature^5 exponentially rewards 85%+ performers
+- Once you have 85%+ average score, focus on attracting users for EPM.
 
 ### Key Success Factors
 
-1. **High Performance** (50% of weight - aim for 90%+ with temperature boost)
-2. **High EPM** (50% of weight - attract users!)
-3. **Reliability** (high uptime target)
-4. **Fast Responses** (< 3 seconds ideal)
-5. **Low Error Rate** (< 1% failures)
+1. **High Accuracy** (70% of LLM judge score - get the right answer!)
+2. **High Performance Score** (85%+ with temperature^5 = exponential rewards)
+3. **High EPM** (50% of final weight - attract real users!)
+4. **Reliability** (maximize uptime - EPM accumulates while online)
+5. **Fast Responses** (avoid timeouts, < 60s required, < 3s ideal)
 
 ---
 
@@ -904,6 +965,6 @@ A: Both are equally important (50/50 split). However, **start with performance**
 
 ---
 
-*Last Updated: November 24, 2025*  
+*Last Updated: December 8, 2025*  
 *Subnet: 80 (Agent Network)*  
-*Version: 1.0*
+*Version: 2.0*
