@@ -211,7 +211,7 @@ async def health_check():
     """Health check endpoint."""
     logger.info("GET /health - Health check endpoint accessed")
     try:
-        stats = conversation_manager.get_stats()
+        stats = conversation_manager.get_stats_sync()
         response = {
             "status": "healthy",
             "llm_provider": settings.llm_provider,
@@ -457,7 +457,7 @@ async def list_all_conversations(request: Request):
     logger.info("GET /conversations - Request to list all conversations")
     try:
         # Get stats directly from conversation manager (uses database)
-        stats = conversation_manager.get_stats()
+        stats = conversation_manager.get_stats_sync()
         
         response = {
             "total_conversations": stats["total_conversations"],
@@ -487,7 +487,7 @@ async def get_conversation_history(request: Request, cid: str):
     logger.info(f"GET /conversations/{cid} - Request to get conversation history")
     try:
         context = conversation_manager.get_or_create(cid)
-        messages = context.get_messages()
+        messages = await context.get_messages()
         
         response = {
             "cid": cid,
@@ -530,7 +530,7 @@ async def delete_conversation(request: Request, cid: str):
             )
         
         # Delete from database
-        conversation_manager.delete(cid)
+        await conversation_manager.delete(cid)
         logger.info(f"DELETE /conversations/{cid} - Successfully deleted conversation from database")
         
         response = {

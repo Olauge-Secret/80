@@ -39,11 +39,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python run.py                    # Development mode (auto-reload)
-  python run.py --production       # Production mode (4 workers)
+  python run.py                    # Development mode (auto-reload, 1 worker)
+  python run.py --production       # Production mode (8 workers)
   python run.py --port 8080        # Custom port
   python run.py --host 0.0.0.0     # Listen on all interfaces
-  python run.py --workers 8        # Custom worker count
+  python run.py --workers 4        # Custom worker count
   python run.py --provider chute   # Use Chute instead of OpenAI
         """
     )
@@ -65,7 +65,7 @@ Examples:
         "--workers",
         type=int,
         default=1,
-        help="Number of worker processes (default: 1 for dev, 4 for production)"
+        help="Number of worker processes (default: 1 for dev, 8 for production)"
     )
     
     parser.add_argument(
@@ -121,7 +121,7 @@ Examples:
     # Set production defaults
     if args.production:
         if args.workers == 1:  # User didn't specify workers
-            args.workers = 4
+            args.workers = 8
         reload = False
     else:
         reload = args.reload

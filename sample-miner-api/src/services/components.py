@@ -56,7 +56,7 @@ async def get_context_additions(
     # Get conversation history if enabled
     conversation_history = []
     if component_input.use_conversation_history:
-        conversation_history = context.get_recent_messages(count=5)
+        conversation_history = await context.get_recent_messages(count=5)
         logger.info(f"[{component_name}] Using conversation history: {len(conversation_history)} messages")
     else:
         logger.info(f"[{component_name}] Conversation history disabled")
@@ -255,8 +255,8 @@ Complete this task and respond in JSON format."""
             logger.info(f"[complete] No previous notebook found to resolve - keeping 'no update'")
     
     # Store in conversation history
-    context.add_user_message(f"Task: {component_input.task}\n{input_text}")
-    context.add_assistant_message(immediate_response)
+    await context.add_user_message(f"Task: {component_input.task}\n{input_text}")
+    await context.add_assistant_message(immediate_response)
     
     return ComponentOutput(
         cid=component_input.cid,
@@ -361,8 +361,8 @@ Refine and improve the outputs. Respond in JSON format."""
             logger.info(f"[refine] No previous notebook found to resolve - keeping 'no update'")
     
     # Store in conversation history
-    context.add_user_message(f"Refine task: {component_input.task}")
-    context.add_assistant_message(immediate_response)
+    await context.add_user_message(f"Refine task: {component_input.task}")
+    await context.add_assistant_message(immediate_response)
     
     return ComponentOutput(
         cid=component_input.cid,
@@ -435,8 +435,8 @@ Format your feedback clearly with sections."""
     )
     
     # Store in conversation history
-    context.add_user_message(f"Feedback request: {component_input.task}")
-    context.add_assistant_message(response)
+    await context.add_user_message(f"Feedback request: {component_input.task}")
+    await context.add_assistant_message(response)
     
     # Feedback is conversational - no notebook editing
     return ComponentOutput(
@@ -501,9 +501,10 @@ async def component_human_feedback(
         playbook_service = get_playbook_service()
         
         # Get conversation context for better extraction
+        messages = await context.get_messages()
         conversation_context = "\n".join([
             f"{msg['role']}: {msg['content'][:100]}..."
-            for msg in context.get_messages()[-5:]  # Last 5 messages
+            for msg in messages[-5:]  # Last 5 messages
         ])
         
         # Extract insights using LLM
@@ -559,8 +560,8 @@ async def component_human_feedback(
         logger.info(f"[human_feedback] Extracted {len(insights)} insights, created/updated {len(entries)} entries")
         
         # Store in conversation history
-        context.add_user_message(f"User feedback: {feedback_text}")
-        context.add_assistant_message(message)
+        await context.add_user_message(f"User feedback: {feedback_text}")
+        await context.add_assistant_message(message)
         
         # Create JSON summary of insights for notebook
         notebook_data = {
@@ -594,8 +595,8 @@ async def component_human_feedback(
             f"feedback is stored in conversation history)"
         )
         
-        context.add_user_message(f"User feedback: {feedback_text}")
-        context.add_assistant_message(message)
+        await context.add_user_message(f"User feedback: {feedback_text}")
+        await context.add_assistant_message(message)
         
         return ComponentOutput(
             cid=component_input.cid,
@@ -777,8 +778,8 @@ async def component_internet_search(
         response = f"Unexpected error during search: {str(e)}"
     
     # Store in conversation history
-    context.add_user_message(f"Search: {', '.join(search_queries)}")
-    context.add_assistant_message(response)
+    await context.add_user_message(f"Search: {', '.join(search_queries)}")
+    await context.add_assistant_message(response)
     
     # Internet search is conversational - no notebook editing
     return ComponentOutput(
@@ -898,8 +899,8 @@ Respond in JSON format."""
             logger.info(f"[summary] No previous notebook found to resolve - keeping 'no update'")
     
     # Store in conversation history
-    context.add_user_message(f"Summarize: {component_input.task}")
-    context.add_assistant_message(immediate_response)
+    await context.add_user_message(f"Summarize: {component_input.task}")
+    await context.add_assistant_message(immediate_response)
     
     return ComponentOutput(
         cid=component_input.cid,
@@ -1021,8 +1022,8 @@ Respond in JSON format."""
             logger.info(f"[aggregate] No previous notebook found to resolve - keeping 'no update'")
     
     # Store in conversation history
-    context.add_user_message(f"Aggregate: {component_input.task}")
-    context.add_assistant_message(immediate_response)
+    await context.add_user_message(f"Aggregate: {component_input.task}")
+    await context.add_assistant_message(immediate_response)
     
     return ComponentOutput(
         cid=component_input.cid,

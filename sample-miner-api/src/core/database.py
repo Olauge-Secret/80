@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from typing import Generator
 from sqlmodel import SQLModel, create_engine, Session
+from sqlalchemy import event
 from src.core.config import settings
 
 # Import all models to ensure they're registered with SQLModel
@@ -30,13 +31,38 @@ if DATABASE_URL.startswith("sqlite"):
         logger.info(f"Created database directory: {db_file.parent}")
 
 # Create engine with appropriate settings for SQLite
-engine = create_engine(
-    DATABASE_URL,
-    echo=settings.debug,  # Log SQL queries in debug mode
-    connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {},
-    # For SQLite, we don't need connection pooling
-    poolclass=None if DATABASE_URL.startswith("sqlite") else None
-)
+# Enable WAL mode for better concurrent access from multiple workers
+if DATABASE_URL.startswith("sqlite"):
+    # Use WAL mode for better multi-process/worker support
+    # WAL allows concurrent reads and writes without blocking
+    connect_args = {
+        "check_same_thread": False,
+        "timeout": 30.0  # Wait up to 30 seconds for locks
+    }
+    engine = create_engine(
+        DATABASE_URL,
+        echo=settings.debug,
+        connect_args=connect_args,
+        poolclass=None
+    )
+    # Enable WAL mode after engine creation
+    @event.listens_for(engine, "connect")
+    def set_sqlite_pragma(dbapi_conn, connection_record):
+        """Enable WAL mode for SQLite to support concurrent access."""
+        cursor = dbapi_conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")  # Balance between safety and performance
+        cursor.execute("PRAGMA busy_timeout=30000")  # 30 second timeout
+        cursor.close()
+else:
+    engine = create_engine(
+        DATABASE_URL,
+        echo=settings.debug,
+        connect_args={},
+        pool_size=settings.database_pool_size,
+        max_overflow=settings.database_max_overflow,
+        pool_recycle=settings.database_pool_recycle
+    )
 
 
 def create_db_and_tables():

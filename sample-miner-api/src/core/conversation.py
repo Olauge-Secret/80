@@ -2,9 +2,12 @@
 
 This module uses SQLite for persistent storage (file-based, zero configuration).
 Database file location: ./data/miner_api.db (configured in .env)
+
+All database operations are run in a thread pool to enable concurrent request handling.
 """
 
 import logging
+import asyncio
 from typing import Dict, List, Optional
 from datetime import datetime
 from src.repositories.conversation_repository import ConversationRepository
@@ -27,10 +30,14 @@ class ConversationContext:
     def __init__(self, cid: str):
         self.cid = cid
         self.repository = ConversationRepository()
-        # Ensure conversation exists in database
-        self.repository.get_or_create_conversation(cid)
+        # Note: Conversation creation is deferred to first async operation
+        # This prevents blocking during initialization
     
-    def add_message(self, role: str, content: str, extra_data: Optional[dict] = None):
+    async def _ensure_conversation_exists(self):
+        """Ensure conversation exists in database (async wrapper)."""
+        await asyncio.to_thread(self.repository.get_or_create_conversation, self.cid)
+    
+    async def add_message(self, role: str, content: str, extra_data: Optional[dict] = None):
         """
         Add a message to conversation history. Stores up to 10 recent messages.
         Automatically cleans up messages older than 7 days.
@@ -40,35 +47,46 @@ class ConversationContext:
             logger.warning(f"Skipping empty message for conversation {self.cid}")
             return
         
-        # Add message to database
-        self.repository.add_message(
-            cid=self.cid,
-            role=role,
-            content=content,
-            extra_data=extra_data
+        # Ensure conversation exists first
+        await self._ensure_conversation_exists()
+        
+        # Add message to database (run in thread pool to avoid blocking)
+        await asyncio.to_thread(
+            self.repository.add_message,
+            self.cid,
+            role,
+            content,
+            extra_data
         )
     
-    def add_user_message(self, content: str, extra_data: Optional[dict] = None):
+    async def add_user_message(self, content: str, extra_data: Optional[dict] = None):
         """Add a user message to conversation history."""
-        self.add_message("user", content, extra_data)
+        await self.add_message("user", content, extra_data)
     
-    def add_assistant_message(self, content: str, extra_data: Optional[dict] = None):
+    async def add_assistant_message(self, content: str, extra_data: Optional[dict] = None):
         """Add an assistant message to conversation history."""
-        self.add_message("assistant", content, extra_data)
+        await self.add_message("assistant", content, extra_data)
     
-    def get_messages(self) -> List[Dict]:
+    async def get_messages(self) -> List[Dict]:
         """
         Get conversation history as a list of message dictionaries.
         Returns up to 10 most recent messages, excluding messages older than 7 days.
         """
-        messages = self.repository.get_recent_messages(self.cid, count=self.MAX_MESSAGES)
+        # Ensure conversation exists first
+        await self._ensure_conversation_exists()
+        
+        messages = await asyncio.to_thread(
+            self.repository.get_recent_messages,
+            self.cid,
+            self.MAX_MESSAGES
+        )
         return messages
     
-    def get_context_summary(self) -> str:
+    async def get_context_summary(self) -> str:
         """
         Get a summary of the conversation context from recent messages.
         """
-        messages = self.get_messages()
+        messages = await self.get_messages()
         if not messages:
             return "No conversation context yet."
         
@@ -80,14 +98,14 @@ class ConversationContext:
         
         return history_text
     
-    def get_context(self) -> str:
+    async def get_context(self) -> str:
         """
         Get full conversation context as formatted string for LLM.
         Alias for get_context_summary.
         """
-        return self.get_context_summary()
+        return await self.get_context_summary()
     
-    def get_recent_messages(self, count: int = 5) -> List[Dict]:
+    async def get_recent_messages(self, count: int = 5) -> List[Dict]:
         """
         Get the most recent N messages.
         
@@ -97,22 +115,37 @@ class ConversationContext:
         Returns:
             List of message dictionaries
         """
-        return self.repository.get_recent_messages(self.cid, count=count)
+        return await asyncio.to_thread(
+            self.repository.get_recent_messages,
+            self.cid,
+            count
+        )
     
-    def clear(self):
+    async def clear(self):
         """Clear conversation messages by deleting the conversation."""
-        self.repository.delete_conversation(self.cid)
+        await asyncio.to_thread(self.repository.delete_conversation, self.cid)
         logger.info(f"Cleared messages for conversation {self.cid}.")
     
+    async def get_created_at(self) -> Optional[datetime]:
+        """Get conversation creation time."""
+        conversation = await asyncio.to_thread(self.repository.get_conversation, self.cid)
+        return conversation.created_at if conversation else None
+    
+    async def get_last_updated(self) -> Optional[datetime]:
+        """Get last update time."""
+        conversation = await asyncio.to_thread(self.repository.get_conversation, self.cid)
+        return conversation.last_updated if conversation else None
+    
+    # Properties for backward compatibility (now async)
     @property
     def created_at(self) -> Optional[datetime]:
-        """Get conversation creation time."""
+        """Get conversation creation time (synchronous, for backward compatibility)."""
         conversation = self.repository.get_conversation(self.cid)
         return conversation.created_at if conversation else None
     
     @property
-    def last_updated(self) -> Optional[datetime]:
-        """Get last update time."""
+    def last_activity(self) -> Optional[datetime]:
+        """Get last update time (synchronous, for backward compatibility)."""
         conversation = self.repository.get_conversation(self.cid)
         return conversation.last_updated if conversation else None
 
@@ -137,12 +170,37 @@ class ConversationManager:
             return ConversationContext(cid)
         return None
     
-    def delete(self, cid: str):
+    async def delete(self, cid: str):
         """Delete a conversation context."""
+        await asyncio.to_thread(self.repository.delete_conversation, cid)
+    
+    def delete_sync(self, cid: str):
+        """Delete a conversation context (synchronous version for backward compatibility)."""
         self.repository.delete_conversation(cid)
     
-    def get_stats(self) -> Dict:
+    async def get_stats(self) -> Dict:
         """Get statistics about conversations."""
+        conversations = await asyncio.to_thread(
+            self.repository.get_all_conversations,
+            100
+        )
+        
+        return {
+            "total_conversations": len(conversations),
+            "max_conversations": 100,  # Database limit for stats display
+            "conversations": [
+                {
+                    "cid": conv.cid,
+                    "messages": conv.message_count,
+                    "created_at": conv.created_at.isoformat(),
+                    "last_updated": conv.last_updated.isoformat()
+                }
+                for conv in conversations
+            ]
+        }
+    
+    def get_stats_sync(self) -> Dict:
+        """Get statistics about conversations (synchronous version for backward compatibility)."""
         conversations = self.repository.get_all_conversations(limit=100)
         
         return {
