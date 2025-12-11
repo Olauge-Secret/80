@@ -13,12 +13,86 @@ an OpenAI-compatible interface for all.
 import logging
 import re
 import time
+import json
+from pathlib import Path
 from typing import Optional, List, Dict, Any
 from openai import AsyncOpenAI, OpenAIError
 import httpx
 from src.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+# Set up inference logging to file
+_inference_logger = None
+_inference_log_path = None
+
+def _setup_inference_logger():
+    """Set up a dedicated logger for inference times that writes to a file."""
+    global _inference_logger, _inference_log_path
+    
+    if _inference_logger is not None:
+        return _inference_logger
+    
+    # Create logs directory if it doesn't exist
+    log_dir = Path("./logs")
+    log_dir.mkdir(exist_ok=True)
+    
+    # Create inference log file path
+    _inference_log_path = log_dir / "inference.log"
+    
+    # Create logger
+    _inference_logger = logging.getLogger("inference")
+    _inference_logger.setLevel(logging.INFO)
+    
+    # Remove existing handlers to avoid duplicates
+    _inference_logger.handlers.clear()
+    
+    # Create file handler
+    file_handler = logging.FileHandler(_inference_log_path, mode='a', encoding='utf-8')
+    file_handler.setLevel(logging.INFO)
+    
+    # Create formatter
+    formatter = logging.Formatter('%(message)s')
+    file_handler.setFormatter(formatter)
+    
+    # Add handler to logger
+    _inference_logger.addHandler(file_handler)
+    
+    # Prevent propagation to root logger
+    _inference_logger.propagate = False
+    
+    logger.info(f"Inference logging enabled. Log file: {_inference_log_path.absolute()}")
+    
+    return _inference_logger
+
+def _log_inference(
+    provider: str,
+    model: str,
+    tokens_used: int,
+    inference_time: float,
+    method: str = "generate_response",
+    finish_reason: Optional[str] = None
+):
+    """Log inference details to file in JSON format."""
+    global _inference_logger
+    
+    if _inference_logger is None:
+        _inference_logger = _setup_inference_logger()
+    
+    # Create log entry
+    log_entry = {
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
+        "provider": provider,
+        "model": model,
+        "method": method,
+        "tokens_used": tokens_used,
+        "inference_time_seconds": round(inference_time, 3),
+        "tokens_per_second": round(tokens_used / inference_time, 2) if inference_time > 0 else 0,
+        "finish_reason": finish_reason
+    }
+    
+    # Log as JSON (one line per inference)
+    _inference_logger.info(json.dumps(log_entry))
 
 
 def strip_reasoning_tags(text: str) -> str:
@@ -223,9 +297,18 @@ class LLMClient:
                 "response": cleaned_content,
                 "model": response.model,
                 "tokens_used": response.usage.total_tokens,
-                "finish_reason": response.choices[0].finish_reason,
-                "inference_time_seconds": inference_time
+                "finish_reason": response.choices[0].finish_reason
             }
+            
+            # Log inference to file
+            _log_inference(
+                provider=self.provider,
+                model=response.model,
+                tokens_used=result['tokens_used'],
+                inference_time=inference_time,
+                method="generate_response",
+                finish_reason=result['finish_reason']
+            )
             
             logger.info(f"Successfully generated response. Tokens used: {result['tokens_used']}, Inference time: {inference_time:.3f}s")
             logger.info(f"Response: {result['response']}")
@@ -316,6 +399,16 @@ class LLMClient:
                 "finish_reason": response.choices[0].finish_reason
             }
             
+            # Log inference to file
+            _log_inference(
+                provider=self.provider,
+                model=response.model,
+                tokens_used=result['tokens_used'],
+                inference_time=inference_time,
+                method="complete_text",
+                finish_reason=result['finish_reason']
+            )
+            
             logger.info(f"Successfully completed text. Tokens used: {result['tokens_used']}, Inference time: {inference_time:.3f}s")
             return result
             
@@ -363,12 +456,31 @@ class LLMClient:
             
             logger.info(f"Starting streaming response with model: {self.model}")
             start_time = time.perf_counter()
+            tokens_used = 0
+            finish_reason = None
             
             async for chunk in await self.client.chat.completions.create(**params):
                 if chunk.choices[0].delta.content:
                     yield chunk.choices[0].delta.content
+                # Try to get token usage from chunk if available
+                if hasattr(chunk, 'usage') and chunk.usage:
+                    tokens_used = chunk.usage.total_tokens
+                # Try to get finish reason from chunk if available
+                if hasattr(chunk.choices[0], 'finish_reason') and chunk.choices[0].finish_reason:
+                    finish_reason = chunk.choices[0].finish_reason
             
             inference_time = time.perf_counter() - start_time
+            
+            # Log inference to file (for streaming, tokens might be 0 if not available in chunks)
+            _log_inference(
+                provider=self.provider,
+                model=self.model,
+                tokens_used=tokens_used if tokens_used > 0 else 0,
+                inference_time=inference_time,
+                method="generate_streaming_response",
+                finish_reason=finish_reason
+            )
+            
             logger.info(f"Streaming completed. Total inference time: {inference_time:.3f}s")
                     
         except OpenAIError as e:

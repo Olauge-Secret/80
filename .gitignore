@@ -137,6 +137,9 @@ celerybeat.pid
 # Environments
 .env
 .envrc
+
+# Log files directory
+logs/
 .venv
 env/
 venv/
