@@ -12,6 +12,7 @@ an OpenAI-compatible interface for all.
 
 import logging
 import re
+import time
 from typing import Optional, List, Dict, Any
 from openai import AsyncOpenAI, OpenAIError
 import httpx
@@ -205,9 +206,11 @@ class LLMClient:
             if response_format:
                 params["response_format"] = response_format
             
-            # Make API call
+            # Make API call with timing
             logger.info(f"Calling {self.provider.upper()} API with model: {self.model}")
+            start_time = time.perf_counter()
             response = await self.client.chat.completions.create(**params)
+            inference_time = time.perf_counter() - start_time
             
             # Extract response data
             message = response.choices[0].message
@@ -220,10 +223,11 @@ class LLMClient:
                 "response": cleaned_content,
                 "model": response.model,
                 "tokens_used": response.usage.total_tokens,
-                "finish_reason": response.choices[0].finish_reason
+                "finish_reason": response.choices[0].finish_reason,
+                "inference_time_seconds": inference_time
             }
             
-            logger.info(f"Successfully generated response. Tokens used: {result['tokens_used']}")
+            logger.info(f"Successfully generated response. Tokens used: {result['tokens_used']}, Inference time: {inference_time:.3f}s")
             logger.info(f"Response: {result['response']}")
             return result
             
@@ -293,8 +297,10 @@ class LLMClient:
                 params["max_tokens"] = max_tokens or settings.max_tokens
                 params["temperature"] = temperature if temperature is not None else settings.temperature
             
-            # Make API call
+            # Make API call with timing
+            start_time = time.perf_counter()
             response = await self.client.chat.completions.create(**params)
+            inference_time = time.perf_counter() - start_time
             
             # Extract response data
             message = response.choices[0].message
@@ -310,7 +316,7 @@ class LLMClient:
                 "finish_reason": response.choices[0].finish_reason
             }
             
-            logger.info(f"Successfully completed text. Tokens used: {result['tokens_used']}")
+            logger.info(f"Successfully completed text. Tokens used: {result['tokens_used']}, Inference time: {inference_time:.3f}s")
             return result
             
         except OpenAIError as e:
@@ -356,10 +362,14 @@ class LLMClient:
                 params["temperature"] = temperature if temperature is not None else settings.temperature
             
             logger.info(f"Starting streaming response with model: {self.model}")
+            start_time = time.perf_counter()
             
             async for chunk in await self.client.chat.completions.create(**params):
                 if chunk.choices[0].delta.content:
                     yield chunk.choices[0].delta.content
+            
+            inference_time = time.perf_counter() - start_time
+            logger.info(f"Streaming completed. Total inference time: {inference_time:.3f}s")
                     
         except OpenAIError as e:
             logger.error(f"{self.provider.upper()} streaming error: {str(e)}")
