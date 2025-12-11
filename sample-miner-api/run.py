@@ -87,10 +87,19 @@ Examples:
         help=f"LLM provider to use (default from .env: {default_provider})"
     )
     
+    parser.add_argument(
+        "--save-messages",
+        action="store_true",
+        help="Save request and response messages to file (logs/messages.log)"
+    )
+    
     args = parser.parse_args()
     
     # Set LLM_PROVIDER environment variable based on argument
     os.environ["LLM_PROVIDER"] = args.provider
+    
+    # Set SAVE_MESSAGES environment variable based on argument
+    os.environ["SAVE_MESSAGES"] = "true" if args.save_messages else "false"
     
     # Check if database exists (it will be created automatically if missing)
     db_path = Path("./data/miner_api.db")
@@ -136,6 +145,7 @@ Examples:
     print(f"Workers:     {args.workers}")
     print(f"Mode:        {'Production' if args.production else 'Development'}")
     print(f"Auto-reload: {'Yes' if reload else 'No'}")
+    print(f"Save messages: {'Yes' if args.save_messages else 'No'}")
     print(f"Database:    {db_path.absolute()}")
     print("=" * 60)
     print()

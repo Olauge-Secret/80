@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     # API Settings
     debug: bool = False
     log_level: str = "INFO"
+    save_messages: bool = False  # Save request/response messages to file
     
     # Gradio Test UI Configuration
     api_base_url: Optional[str] = None

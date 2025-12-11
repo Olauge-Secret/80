@@ -26,6 +26,10 @@ logger = logging.getLogger(__name__)
 _inference_logger = None
 _inference_log_path = None
 
+# Set up message logging to file
+_messages_logger = None
+_messages_log_path = None
+
 def _setup_inference_logger():
     """Set up a dedicated logger for inference times that writes to a file."""
     global _inference_logger, _inference_log_path
@@ -93,6 +97,77 @@ def _log_inference(
     
     # Log as JSON (one line per inference)
     _inference_logger.info(json.dumps(log_entry))
+
+
+def _setup_messages_logger():
+    """Set up a dedicated logger for request/response messages that writes to a file."""
+    global _messages_logger, _messages_log_path
+    
+    if _messages_logger is not None:
+        return _messages_logger
+    
+    # Create logs directory if it doesn't exist
+    log_dir = Path("./logs")
+    log_dir.mkdir(exist_ok=True)
+    
+    # Create messages log file path
+    _messages_log_path = log_dir / "messages.log"
+    
+    # Create logger
+    _messages_logger = logging.getLogger("messages")
+    _messages_logger.setLevel(logging.INFO)
+    
+    # Remove existing handlers to avoid duplicates
+    _messages_logger.handlers.clear()
+    
+    # Create file handler
+    file_handler = logging.FileHandler(_messages_log_path, mode='a', encoding='utf-8')
+    file_handler.setLevel(logging.INFO)
+    
+    # Create formatter
+    formatter = logging.Formatter('%(message)s')
+    file_handler.setFormatter(formatter)
+    
+    # Add handler to logger
+    _messages_logger.addHandler(file_handler)
+    
+    # Prevent propagation to root logger
+    _messages_logger.propagate = False
+    
+    logger.info(f"Message logging enabled. Log file: {_messages_log_path.absolute()}")
+    
+    return _messages_logger
+
+
+def _save_messages(
+    provider: str,
+    model: str,
+    request_messages: List[Dict[str, str]],
+    response_content: str,
+    method: str = "generate_response"
+):
+    """Save request and response messages to file in JSON format."""
+    global _messages_logger
+    
+    # Only save if enabled in settings
+    if not settings.save_messages:
+        return
+    
+    if _messages_logger is None:
+        _messages_logger = _setup_messages_logger()
+    
+    # Create log entry
+    log_entry = {
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
+        "provider": provider,
+        "model": model,
+        "method": method,
+        "request_messages": request_messages,
+        "response": response_content
+    }
+    
+    # Log as JSON (one line per request/response pair)
+    _messages_logger.info(json.dumps(log_entry, ensure_ascii=False))
 
 
 def strip_reasoning_tags(text: str) -> str:
@@ -310,6 +385,15 @@ class LLMClient:
                 finish_reason=result['finish_reason']
             )
             
+            # Save request and response messages if enabled
+            _save_messages(
+                provider=self.provider,
+                model=response.model,
+                request_messages=messages,
+                response_content=cleaned_content,
+                method="generate_response"
+            )
+            
             logger.info(f"Successfully generated response. Tokens used: {result['tokens_used']}, Inference time: {inference_time:.3f}s")
             logger.info(f"Response: {result['response']}")
             return result
@@ -409,6 +493,15 @@ class LLMClient:
                 finish_reason=result['finish_reason']
             )
             
+            # Save request and response messages if enabled
+            _save_messages(
+                provider=self.provider,
+                model=response.model,
+                request_messages=messages,
+                response_content=cleaned_content,
+                method="complete_text"
+            )
+            
             logger.info(f"Successfully completed text. Tokens used: {result['tokens_used']}, Inference time: {inference_time:.3f}s")
             return result
             
@@ -458,10 +551,13 @@ class LLMClient:
             start_time = time.perf_counter()
             tokens_used = 0
             finish_reason = None
+            full_response = []  # Collect all chunks for saving
             
             async for chunk in await self.client.chat.completions.create(**params):
                 if chunk.choices[0].delta.content:
-                    yield chunk.choices[0].delta.content
+                    content = chunk.choices[0].delta.content
+                    full_response.append(content)
+                    yield content
                 # Try to get token usage from chunk if available
                 if hasattr(chunk, 'usage') and chunk.usage:
                     tokens_used = chunk.usage.total_tokens
@@ -470,6 +566,7 @@ class LLMClient:
                     finish_reason = chunk.choices[0].finish_reason
             
             inference_time = time.perf_counter() - start_time
+            response_content = "".join(full_response)
             
             # Log inference to file (for streaming, tokens might be 0 if not available in chunks)
             _log_inference(
@@ -479,6 +576,15 @@ class LLMClient:
                 inference_time=inference_time,
                 method="generate_streaming_response",
                 finish_reason=finish_reason
+            )
+            
+            # Save request and response messages if enabled
+            _save_messages(
+                provider=self.provider,
+                model=self.model,
+                request_messages=params["messages"],
+                response_content=response_content,
+                method="generate_streaming_response"
             )
             
             logger.info(f"Streaming completed. Total inference time: {inference_time:.3f}s")
