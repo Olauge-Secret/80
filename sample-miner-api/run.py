@@ -32,6 +32,7 @@ def main():
     # Get defaults from environment variables
     default_host = os.getenv("HOST", "0.0.0.0")
     default_port = int(os.getenv("PORT", "8001"))
+    default_provider = os.getenv("LLM_PROVIDER", "openai")
     
     parser = argparse.ArgumentParser(
         description="Sample Miner API Server",
@@ -43,6 +44,7 @@ Examples:
   python run.py --port 8080        # Custom port
   python run.py --host 0.0.0.0     # Listen on all interfaces
   python run.py --workers 8        # Custom worker count
+  python run.py --provider chute   # Use Chute instead of OpenAI
         """
     )
     
@@ -78,7 +80,17 @@ Examples:
         help="Enable auto-reload on code changes (development only)"
     )
     
+    parser.add_argument(
+        "--provider",
+        choices=["openai", "chute"],
+        default=default_provider,
+        help=f"LLM provider to use (default from .env: {default_provider})"
+    )
+    
     args = parser.parse_args()
+    
+    # Set LLM_PROVIDER environment variable based on argument
+    os.environ["LLM_PROVIDER"] = args.provider
     
     # Check if database exists (it will be created automatically if missing)
     db_path = Path("./data/miner_api.db")
@@ -120,6 +132,7 @@ Examples:
     print("=" * 60)
     print(f"Host:        {args.host}{' (from .env)' if args.host == default_host else ' (from --host)'}")
     print(f"Port:        {args.port}{' (from .env)' if args.port == default_port else ' (from --port)'}")
+    print(f"Provider:    {args.provider}{' (from .env)' if args.provider == default_provider else ' (from --provider)'}")
     print(f"Workers:     {args.workers}")
     print(f"Mode:        {'Production' if args.production else 'Development'}")
     print(f"Auto-reload: {'Yes' if reload else 'No'}")

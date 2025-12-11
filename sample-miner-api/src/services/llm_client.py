@@ -1,21 +1,72 @@
-"""LLM API client wrapper with support for OpenAI and vLLM.
+"""LLM API client wrapper with support for OpenAI, vLLM, and Chute.
 
 This module provides a unified interface for interacting with Large Language Models
 through different providers:
 - OpenAI: Cloud-based API (GPT-4o, GPT-4-turbo, etc.)
 - vLLM: Self-hosted models (Llama, Qwen, Mistral, etc.)
+- Chute: Chute AI API (DeepSeek-R1, etc.)
 
 The client automatically detects the provider from settings and provides
-an OpenAI-compatible interface for both.
+an OpenAI-compatible interface for all.
 """
 
 import logging
+import re
 from typing import Optional, List, Dict, Any
 from openai import AsyncOpenAI, OpenAIError
 import httpx
 from src.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def strip_reasoning_tags(text: str) -> str:
+    """
+    Remove reasoning/thinking tags from LLM responses.
+    
+    Removes content between tags like:
+    - <think>...</think>
+    - <think>...</think>
+    - <reasoning>...</reasoning>
+    - <thought>...</thought>
+    
+    Args:
+        text: Raw text that may contain reasoning tags
+        
+    Returns:
+        Text with reasoning tags and their content removed
+    """
+    if not text:
+        return text
+    
+    # List of common reasoning tag names to remove
+    reasoning_tags = [
+        'redacted_reasoning',
+        'think',
+        'reasoning',
+        'thought',
+        'thinking'
+    ]
+    
+    cleaned = text
+    
+    # Remove each type of reasoning tag (case-insensitive)
+    for tag in reasoning_tags:
+        # Pattern: <tag>...</tag> or <tag_name>...</tag_name>
+        # Using non-greedy match (.*?) to match shortest possible content
+        pattern = rf'<{tag}[^>]*>.*?</{tag}>'
+        cleaned = re.sub(pattern, '', cleaned, flags=re.DOTALL | re.IGNORECASE)
+    
+    # Also remove any self-closing reasoning tags
+    for tag in reasoning_tags:
+        pattern = rf'<{tag}[^>]*/>'
+        cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
+    
+    # Clean up extra whitespace (multiple newlines/spaces)
+    cleaned = re.sub(r'\n\s*\n\s*\n+', '\n\n', cleaned)  # Multiple newlines -> double newline
+    cleaned = cleaned.strip()
+    
+    return cleaned
 
 
 class LLMClient:
@@ -59,8 +110,18 @@ class LLMClient:
             )
             logger.info(f"Initialized vLLM client at {settings.get_vllm_base_url} with model: {self.model} (with connection pooling)")
         
+        elif self.provider == "chute":
+            # Chute uses OpenAI-compatible API with connection pooling
+            chute_api_key = settings.get_chute_api_key()
+            self.client = AsyncOpenAI(
+                api_key=chute_api_key,
+                base_url=settings.chutes_base_url,
+                http_client=http_client
+            )
+            logger.info(f"Initialized Chute client at {settings.chutes_base_url} with model: {self.model} (with connection pooling)")
+        
         else:
-            raise ValueError(f"Unsupported LLM provider: {self.provider}. Use 'openai' or 'vllm'.")
+            raise ValueError(f"Unsupported LLM provider: {self.provider}. Use 'openai', 'vllm', or 'chute'.")
     
     async def generate_response(
         self,
@@ -121,7 +182,7 @@ class LLMClient:
             if prompt and prompt.strip():
                 messages.append({"role": "user", "content": prompt})
             
-            logger.info(f"Prepared {len(messages)} messages for OpenAI API")
+            logger.info(f"Prepared {len(messages)} messages for {self.provider.upper()} API")
             
             # Prepare API parameters
             # GPT-5 and newer models have different API requirements
@@ -145,14 +206,18 @@ class LLMClient:
                 params["response_format"] = response_format
             
             # Make API call
-            logger.info(f"Calling OpenAI API with model: {self.model}")
+            logger.info(f"Calling {self.provider.upper()} API with model: {self.model}")
             response = await self.client.chat.completions.create(**params)
             
             # Extract response data
             message = response.choices[0].message
+            raw_content = message.content or ""
+            
+            # Strip reasoning tags (like <think>...</think>)
+            cleaned_content = strip_reasoning_tags(raw_content)
             
             result = {
-                "response": message.content or "",
+                "response": cleaned_content,
                 "model": response.model,
                 "tokens_used": response.usage.total_tokens,
                 "finish_reason": response.choices[0].finish_reason
@@ -163,7 +228,7 @@ class LLMClient:
             return result
             
         except OpenAIError as e:
-            logger.error(f"OpenAI API error: {str(e)}")
+            logger.error(f"{self.provider.upper()} API error: {str(e)}")
             raise
         except Exception as e:
             logger.error(f"Unexpected error in generate_response: {str(e)}")
@@ -233,9 +298,13 @@ class LLMClient:
             
             # Extract response data
             message = response.choices[0].message
+            raw_content = message.content or ""
+            
+            # Strip reasoning tags (like <think>...</think>)
+            cleaned_content = strip_reasoning_tags(raw_content)
             
             result = {
-                "completion": message.content or "",
+                "completion": cleaned_content,
                 "model": response.model,
                 "tokens_used": response.usage.total_tokens,
                 "finish_reason": response.choices[0].finish_reason
@@ -245,7 +314,7 @@ class LLMClient:
             return result
             
         except OpenAIError as e:
-            logger.error(f"OpenAI API error: {str(e)}")
+            logger.error(f"{self.provider.upper()} API error: {str(e)}")
             raise
         except Exception as e:
             logger.error(f"Unexpected error in complete_text: {str(e)}")
@@ -293,7 +362,7 @@ class LLMClient:
                     yield chunk.choices[0].delta.content
                     
         except OpenAIError as e:
-            logger.error(f"OpenAI streaming error: {str(e)}")
+            logger.error(f"{self.provider.upper()} streaming error: {str(e)}")
             raise
         except Exception as e:
             logger.error(f"Unexpected error in streaming: {str(e)}")
@@ -301,7 +370,7 @@ class LLMClient:
     
     async def check_health(self) -> bool:
         """
-        Check if the OpenAI API is accessible.
+        Check if the LLM API is accessible.
         
         Returns:
             True if API is accessible, False otherwise

@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     environment: str = "production"  # Default to production for security
     
     # LLM Provider Configuration
-    llm_provider: str = "openai"  # Options: "openai" or "vllm"
+    llm_provider: str = "openai"  # Options: "openai", "vllm", or "chute"
     
     # OpenAI Configuration
     openai_api_key: str = ""  # REQUIRED: Set in .env file
@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     vllm_base_url: str = "http://localhost:8000/v1"  # vLLM server URL
     vllm_model: str = "hugging-quants/Meta-Llama-3.1-8B-Instruct-AWQ-INT4"
     vllm_api_key: str = ""  # Set via VLLM_API_KEY if using vLLM
+    
+    # Chute Configuration
+    chutes_api_key: str = ""  # REQUIRED: Set in .env file (comma-separated list supported)
+    chutes_model: str = "deepseek-ai/DeepSeek-V3-0324"  # Chute model to use
+    chutes_base_url: str = "https://llm.chutes.ai/v1"  # Chute API base URL
     
     # Model Configuration
     max_tokens: int = 4000
@@ -76,7 +81,17 @@ class Settings(BaseSettings):
             return self.openai_model
         elif self.llm_provider == "vllm":
             return self.vllm_model
+        elif self.llm_provider == "chute":
+            return self.chutes_model
         return self.openai_model
+    
+    def get_chute_api_key(self) -> str:
+        """Get a Chute API key from the comma-separated list (returns first one)."""
+        if not self.chutes_api_key:
+            return ""
+        # Return the first key from comma-separated list
+        keys = [key.strip() for key in self.chutes_api_key.split(",") if key.strip()]
+        return keys[0] if keys else ""
     
     @property
     def get_port(self) -> int:
