@@ -394,7 +394,7 @@ nano .env  # Edit configuration
 API_KEY=<generate-secure-random-key>     # Your miner's API key
 LLM_PROVIDER=openai                      # Use OpenAI
 OPENAI_API_KEY=sk-your-key-here         # Your OpenAI API key
-OPENAI_MODEL=gpt-4o-mini                # Model to use
+OPENAI_MODEL=gpt-4o                # Model to use
 PORT=8001                                # API port
 
 # 5. Run your miner
@@ -468,7 +468,7 @@ All miners must implement the following REST API endpoints:
   "response": "The capital of France is Paris.",
   "metadata": {
     "execution_time": 1.23,
-    "model": "gpt-4o-mini",
+    "model": "gpt-4o",
     "tokens_used": 150
   }
 }
@@ -568,7 +568,7 @@ All miners must implement the following REST API endpoints:
 ```json
 {
   "miner_version": "1.0.0",
-  "model": "gpt-4o-mini",
+  "model": "gpt-4o",
   "features": ["conversation_history", "playbook", "internet_search"],
   "max_context_length": 8000
 }
@@ -594,7 +594,7 @@ All endpoints must return JSON with this structure:
   "response": "The actual response text",
   "metadata": {
     "execution_time": 1.23,
-    "model": "gpt-4o-mini",
+    "model": "gpt-4o",
     "any_other_fields": "optional"
   }
 }
@@ -800,7 +800,7 @@ Provide the final answer in the format: ANSWER: [number]"""
 ```
 
 #### Response Time Optimization:
-- ✅ Use fast models (e.g., `gpt-4o-mini` vs `gpt-4o`)
+- ✅ Use fast models (e.g., `gpt-4o` vs `gpt-4o`)
 - ✅ Cache frequent queries
 - ✅ Optimize your code for speed
 - ✅ Use connection pooling for API calls
@@ -812,7 +812,7 @@ Provide the final answer in the format: ANSWER: [number]"""
 ### 3. Cost Optimization
 
 #### If Using OpenAI:
-- Use `gpt-4o-mini` instead of `gpt-4o` (much cheaper)
+- Use `gpt-4o` instead of `gpt-4o` (much cheaper)
 - Implement smart context windowing (don't send full history)
 - Cache common responses
 - Set max_tokens limit to avoid runaway costs
@@ -902,8 +902,8 @@ A: A system for storing user preferences and insights. Helps personalize respons
 
 ### Optimization Questions
 
-**Q: Should I use GPT-4 or GPT-4o-mini?**  
-A: Start with `gpt-4o-mini` (cheaper, faster). Upgrade to `gpt-4o` if performance is too low.
+**Q: Should I use GPT-4 or gpt-4o?**  
+A: Start with `gpt-4o` (cheaper, faster). Upgrade to `gpt-4o` if performance is too low.
 
 **Q: How much RAM does my server need?**  
 A: 4GB minimum, 8GB recommended for OpenAI API version. More if self-hosting LLM.

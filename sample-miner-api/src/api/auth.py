@@ -33,8 +33,20 @@ async def verify_api_key(api_key: str = Security(api_key_header)) -> str:
             headers={"WWW-Authenticate": "ApiKey"},
         )
     
-    if api_key != settings.get_api_key:
-        logger.warning(f"Invalid API key attempted: {api_key[:10]}...")
+    expected_key = settings.get_api_key
+    
+    # Use constant-time comparison to prevent timing attacks
+    import hmac
+    if not api_key:
+        logger.warning("Invalid API key attempted (empty)")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid API key",
+        )
+    
+    # Constant-time comparison using hmac.compare_digest
+    if not hmac.compare_digest(api_key.encode('utf-8'), expected_key.encode('utf-8')):
+        logger.warning("Invalid API key attempted")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid API key",

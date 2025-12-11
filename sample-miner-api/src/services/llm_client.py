@@ -124,12 +124,21 @@ class LLMClient:
             logger.info(f"Prepared {len(messages)} messages for OpenAI API")
             
             # Prepare API parameters
+            # GPT-5 and newer models have different API requirements
+            is_gpt5 = "gpt-5" in self.model.lower() or "o1" in self.model.lower()
+            
             params = {
                 "model": self.model,
-                "messages": messages,
-                "max_tokens": max_tokens or settings.max_tokens,
-                "temperature": temperature if temperature is not None else settings.temperature
+                "messages": messages
             }
+            
+            # GPT-5 uses max_completion_tokens and only supports temperature=1 (default)
+            if is_gpt5:
+                params["max_completion_tokens"] = max_tokens or settings.max_tokens
+                # GPT-5 only supports temperature=1 (default), don't set it
+            else:
+                params["max_tokens"] = max_tokens or settings.max_tokens
+                params["temperature"] = temperature if temperature is not None else settings.temperature
             
             # Add response format if provided (for JSON mode)
             if response_format:
@@ -202,12 +211,21 @@ class LLMClient:
             logger.info(f"Completing text (length: {len(text_to_complete)} chars)")
             
             # Prepare API parameters
+            # GPT-5 and newer models have different API requirements
+            is_gpt5 = "gpt-5" in self.model.lower() or "o1" in self.model.lower()
+            
             params = {
                 "model": self.model,
-                "messages": messages,
-                "max_tokens": max_tokens or settings.max_tokens,
-                "temperature": temperature if temperature is not None else settings.temperature
+                "messages": messages
             }
+            
+            # GPT-5 uses max_completion_tokens and only supports temperature=1 (default)
+            if is_gpt5:
+                params["max_completion_tokens"] = max_tokens or settings.max_tokens
+                # GPT-5 only supports temperature=1 (default), don't set it
+            else:
+                params["max_tokens"] = max_tokens or settings.max_tokens
+                params["temperature"] = temperature if temperature is not None else settings.temperature
             
             # Make API call
             response = await self.client.chat.completions.create(**params)
@@ -250,13 +268,22 @@ class LLMClient:
             Response chunks as they arrive
         """
         try:
+            # GPT-5 and newer models have different API requirements
+            is_gpt5 = "gpt-5" in self.model.lower() or "o1" in self.model.lower()
+            
             params = {
                 "model": self.model,
                 "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": max_tokens or settings.max_tokens,
-                "temperature": temperature if temperature is not None else settings.temperature,
                 "stream": True
             }
+            
+            # GPT-5 uses max_completion_tokens and only supports temperature=1
+            if is_gpt5:
+                params["max_completion_tokens"] = max_tokens or settings.max_tokens
+                # GPT-5 only supports temperature=1 (default), don't set it
+            else:
+                params["max_tokens"] = max_tokens or settings.max_tokens
+                params["temperature"] = temperature if temperature is not None else settings.temperature
             
             logger.info(f"Starting streaming response with model: {self.model}")
             
@@ -280,11 +307,18 @@ class LLMClient:
         """
         try:
             # Simple test call
-            await self.client.chat.completions.create(
-                model=self.model,
-                messages=[{"role": "user", "content": "test"}],
-                max_tokens=5
-            )
+            # GPT-5 uses max_completion_tokens
+            is_gpt5 = "gpt-5" in self.model.lower() or "o1" in self.model.lower()
+            test_params = {
+                "model": self.model,
+                "messages": [{"role": "user", "content": "test"}]
+            }
+            if is_gpt5:
+                test_params["max_completion_tokens"] = 5
+            else:
+                test_params["max_tokens"] = 5
+            
+            await self.client.chat.completions.create(**test_params)
             return True
         except Exception as e:
             logger.error(f"Health check failed: {str(e)}")

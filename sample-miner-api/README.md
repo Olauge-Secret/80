@@ -62,7 +62,7 @@ cp .env.example .env
 #    - API_KEY=your-secure-random-api-key-here
 #    - LLM_PROVIDER=openai
 #    - OPENAI_API_KEY=sk-your-openai-api-key-here
-#    - OPENAI_MODEL=gpt-4o-mini  (or gpt-4o for better quality)
+#    - OPENAI_MODEL=gpt-4o  (or gpt-4o for better quality)
 
 # 5. Run the API server
 python run.py
@@ -195,7 +195,7 @@ LLM_PROVIDER=openai  # Options: "openai" or "vllm"
 
 # OpenAI Configuration (if LLM_PROVIDER=openai)
 OPENAI_API_KEY=sk-your-openai-api-key-here
-OPENAI_MODEL=gpt-4o-mini  # Options: gpt-4o, gpt-4o-mini, gpt-4-turbo, gpt-3.5-turbo
+OPENAI_MODEL=gpt-4o  # Options: gpt-4o, gpt-4o, gpt-4-turbo, gpt-3.5-turbo
 
 # vLLM Configuration (if LLM_PROVIDER=vllm)
 VLLM_BASE_URL=http://localhost:8000/v1
@@ -219,7 +219,7 @@ Just change `LLM_PROVIDER` in `.env` and restart:
 # For OpenAI
 LLM_PROVIDER=openai
 OPENAI_API_KEY=sk-your-key
-OPENAI_MODEL=gpt-4o-mini
+OPENAI_MODEL=gpt-4o
 
 # For vLLM
 LLM_PROVIDER=vllm

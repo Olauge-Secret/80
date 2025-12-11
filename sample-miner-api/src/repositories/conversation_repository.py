@@ -74,8 +74,17 @@ class ConversationRepository:
         """
         session = self._get_session()
         try:
-            # Get or create conversation
-            conversation = self.get_or_create_conversation(cid)
+            # Get or create conversation in this session
+            statement = select(Conversation).where(Conversation.cid == cid)
+            conversation = session.exec(statement).first()
+            
+            if not conversation:
+                # Create new conversation
+                conversation = Conversation(cid=cid)
+                session.add(conversation)
+                session.commit()
+                session.refresh(conversation)
+                logger.info(f"Created new conversation: {cid}")
             
             # Clean up old messages first
             self._cleanup_old_messages(session, conversation.id)
@@ -91,13 +100,15 @@ class ConversationRepository:
                 extra_data=extra_data or {}
             )
             session.add(message)
+            session.flush()  # Flush to get message ID, but don't commit yet
             
-            # Update conversation metadata
+            # Update conversation metadata (count AFTER adding message)
             conversation.last_updated = datetime.utcnow()
             conversation.message_count = self._count_messages(session, conversation.id)
             
             session.commit()
             session.refresh(message)
+            session.refresh(conversation)  # Refresh conversation to get updated count
             
             logger.info(
                 f"Added {role} message to conversation {cid}. "

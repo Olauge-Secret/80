@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     
     # OpenAI Configuration
     openai_api_key: str = ""  # REQUIRED: Set in .env file
-    openai_model: str = "gpt-4o-mini"
+    openai_model: str = "gpt-5"  # Using GPT-5 (if not available, fallback to gpt-4o)
     openai_base_url: Optional[str] = None  # Optional custom base URL
     
     # vLLM Configuration (for self-hosted models)

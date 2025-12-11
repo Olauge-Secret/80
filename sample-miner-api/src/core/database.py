@@ -7,6 +7,10 @@ from typing import Generator
 from sqlmodel import SQLModel, create_engine, Session
 from src.core.config import settings
 
+# Import all models to ensure they're registered with SQLModel
+from src.models.db_models import Conversation, Message
+from src.models.playbook_models import PlaybookEntry, PlaybookOperation
+
 logger = logging.getLogger(__name__)
 
 # Database URL from settings (defaults to SQLite)
