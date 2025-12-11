@@ -7,7 +7,9 @@ All components follow the same pattern:
 
 import json
 import logging
-from typing import List
+import httpx
+import asyncio
+from typing import List, Optional
 
 from src.models.models import (
     ComponentInput, 
@@ -76,6 +78,86 @@ async def get_context_additions(
     
     return conversation_history, playbook_context
 
+
+def parse_json_response(response: str, component_name: str) -> tuple[str, str]:
+    """
+    Parse JSON response from LLM, handling various formats.
+    
+    Args:
+        response: Raw response string from LLM
+        component_name: Name of component (for logging)
+        
+    Returns:
+        Tuple of (immediate_response, notebook_output)
+    """
+    try:
+        # Try to extract JSON from response (handle markdown code blocks and extra text)
+        response_text = response.strip()
+        
+        # Strategy 1: Try to find JSON in markdown code blocks
+        if "```json" in response_text:
+            response_text = response_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in response_text:
+            # Try to find any code block that might contain JSON
+            parts = response_text.split("```")
+            for i in range(1, len(parts), 2):  # Check every other part (code blocks)
+                try:
+                    test_text = parts[i].strip()
+                    # Remove language identifier if present
+                    if test_text.startswith("json"):
+                        test_text = test_text[4:].strip()
+                    # Try to parse
+                    json.loads(test_text)
+                    response_text = test_text
+                    break
+                except (json.JSONDecodeError, IndexError):
+                    continue
+        
+        # Strategy 2: Try to find JSON object boundaries in the text
+        if not response_text.startswith("{"):
+            # Look for first { and last }
+            first_brace = response_text.find("{")
+            last_brace = response_text.rfind("}")
+            if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+                response_text = response_text[first_brace:last_brace + 1]
+        
+        # Strategy 3: Try parsing as-is
+        result = json.loads(response_text)
+        immediate_response = result.get("immediate_response", response)
+        notebook_output = result.get("notebook", "no update")
+        
+        # Ensure notebook is a string (convert dict/object to JSON string if needed)
+        if isinstance(notebook_output, dict):
+            logger.info(f"[{component_name}] Notebook returned as dict, converting to JSON string")
+            notebook_output = json.dumps(notebook_output, indent=2)
+        elif not isinstance(notebook_output, str):
+            logger.info(f"[{component_name}] Notebook is not a string (type: {type(notebook_output)}), converting")
+            notebook_output = str(notebook_output)
+        
+        logger.debug(f"[{component_name}] Successfully parsed JSON response")
+        return immediate_response, notebook_output
+            
+    except (json.JSONDecodeError, IndexError, ValueError) as e:
+        logger.warning(f"[{component_name}] Failed to parse JSON response: {e}")
+        logger.debug(f"[{component_name}] Response text (first 500 chars): {response[:500]}")
+        # Try one more time with just finding the JSON object
+        try:
+            first_brace = response.find("{")
+            last_brace = response.rfind("}")
+            if first_brace != -1 and last_brace != -1:
+                json_text = response[first_brace:last_brace + 1]
+                result = json.loads(json_text)
+                immediate_response = result.get("immediate_response", response)
+                notebook_output = result.get("notebook", "no update")
+                if isinstance(notebook_output, dict):
+                    notebook_output = json.dumps(notebook_output, indent=2)
+                logger.info(f"[{component_name}] Successfully parsed JSON after fallback extraction")
+                return immediate_response, notebook_output
+            else:
+                raise
+        except Exception:
+            logger.warning(f"[{component_name}] All JSON parsing attempts failed. Using raw response.")
+            return response, "no update"
 
 
 
@@ -157,30 +239,7 @@ Complete this task and respond in JSON format."""
     )
     
     # Parse JSON response
-    try:
-        # Try to extract JSON from response (handle markdown code blocks)
-        response_text = response.strip()
-        if "```json" in response_text:
-            response_text = response_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in response_text:
-            response_text = response_text.split("```")[1].split("```")[0].strip()
-        
-        result = json.loads(response_text)
-        immediate_response = result.get("immediate_response", response)
-        notebook_output = result.get("notebook", "no update")
-        
-        # Ensure notebook is a string (convert dict/object to JSON string if needed)
-        if isinstance(notebook_output, dict):
-            logger.warning(f"[complete] Notebook returned as dict, converting to JSON string")
-            notebook_output = json.dumps(notebook_output, indent=2)
-        elif not isinstance(notebook_output, str):
-            logger.warning(f"[complete] Notebook is not a string (type: {type(notebook_output)}), converting")
-            notebook_output = str(notebook_output)
-            
-    except (json.JSONDecodeError, IndexError) as e:
-        logger.warning(f"[complete] Failed to parse JSON response: {e}. Using raw response.")
-        immediate_response = response
-        notebook_output = "no update"
+    immediate_response, notebook_output = parse_json_response(response, "complete")
     
     # Resolve "no update" for notebook - return previous notebook if exists
     if notebook_output == "no update" and component_input.previous_outputs:
@@ -286,29 +345,7 @@ Refine and improve the outputs. Respond in JSON format."""
     )
     
     # Parse JSON response
-    try:
-        response_text = response.strip()
-        if "```json" in response_text:
-            response_text = response_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in response_text:
-            response_text = response_text.split("```")[1].split("```")[0].strip()
-        
-        result = json.loads(response_text)
-        immediate_response = result.get("immediate_response", response)
-        notebook_output = result.get("notebook", "no update")
-        
-        # Ensure notebook is a string (convert dict/object to JSON string if needed)
-        if isinstance(notebook_output, dict):
-            logger.warning(f"[refine] Notebook returned as dict, converting to JSON string")
-            notebook_output = json.dumps(notebook_output, indent=2)
-        elif not isinstance(notebook_output, str):
-            logger.warning(f"[refine] Notebook is not a string (type: {type(notebook_output)}), converting")
-            notebook_output = str(notebook_output)
-            
-    except (json.JSONDecodeError, IndexError) as e:
-        logger.warning(f"[refine] Failed to parse JSON response: {e}. Using raw response.")
-        immediate_response = response
-        notebook_output = "no update"
+    immediate_response, notebook_output = parse_json_response(response, "refine")
     
     # Resolve "no update" for notebook - return previous notebook if exists
     if notebook_output == "no update" and component_input.previous_outputs:
@@ -572,27 +609,103 @@ async def component_human_feedback(
         )
 
 
+class GoogleSearchClient:
+    """Google Custom Search API client with async support."""
+    
+    def __init__(self):
+        from src.core.config import settings
+        self.base_url = "https://www.googleapis.com/customsearch/v1"
+        self.params = {
+            "key": settings.google_api_key,
+            "cx": settings.google_cx_key,
+        }
+        logger.info("[internet_search] GoogleSearchClient initialized")
+    
+    async def asearch(self, query: str, num_results: int = 5) -> List[dict]:
+        """
+        Perform async Google search.
+        
+        Args:
+            query: Search query string
+            num_results: Number of results to return
+            
+        Returns:
+            List of search result dictionaries with 'title', 'url', and 'snippet' keys
+        """
+        logger.info(f"[internet_search] Performing search for query: {query}, num_results: {num_results}")
+        print("params", self.params)
+        params = {**self.params, "q": query, "num": num_results}
+        
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            try:
+                response = await client.get(self.base_url, params=params)
+                response.raise_for_status()
+                search_results = response.json()
+            except httpx.HTTPStatusError as e:
+                logger.error(f"[internet_search] HTTP error occurred: {e}")
+                return []
+            except Exception as e:
+                logger.error(f"[internet_search] An error occurred during Google search: {e}")
+                return []
+        
+        items = search_results.get('items', [])
+        results = [
+            {
+                "title": item.get('title', 'No title'),
+                "url": item.get('link', ''),
+                "snippet": item.get('snippet', '')
+            }
+            for item in items
+        ]
+        
+        logger.info(f"[internet_search] Search completed. Found {len(results)} results.")
+        return results
+    
+    async def search_many(self, queries: List[str], num_results: int = 5) -> List[dict]:
+        """
+        Execute multiple search queries in parallel.
+        
+        Args:
+            queries: List of search queries to execute
+            num_results: Number of results to fetch per query
+            
+        Returns:
+            Combined list of unique search results from all queries
+        """
+        logger.info(f"[internet_search] Starting search for {len(queries)} queries, {num_results} results each")
+        
+        # Create tasks for all searches
+        search_tasks = [self.asearch(query, num_results) for query in queries]
+        search_results = await asyncio.gather(*search_tasks)
+        
+        # Flatten the list of results and remove duplicates by URL
+        seen_urls = set()
+        unique_results = []
+        
+        for results in search_results:
+            for result in results:
+                url = result.get("url", "")
+                if url and url not in seen_urls:
+                    seen_urls.add(url)
+                    unique_results.append(result)
+        
+        logger.info(f"[internet_search] Completed search with {len(unique_results)} unique results")
+        return unique_results
+
+
 async def component_internet_search(
     component_input: ComponentInput,
     context: ConversationContext
 ) -> ComponentOutput:
     """
-    Internet search component: Search the internet for information.
-    
-    NOTE: This is a template implementation. Miners should implement actual
-    internet search functionality using services like:
-    - Google Custom Search API
-    - Bing Search API
-    - DuckDuckGo API
-    - SerpAPI
-    - Or any other search service
+    Internet search component: Search the internet using Google Custom Search API.
     
     Args:
         component_input: Unified component input with search queries
         context: Conversation context
         
     Returns:
-        ComponentOutput with search results (currently returns "unavailable service")
+        ComponentOutput with search results from Google Custom Search
     """
     logger.info(f"[internet_search] Processing task: {component_input.task}")
     
@@ -601,51 +714,71 @@ async def component_internet_search(
     for item in component_input.input:
         search_queries.append(item.user_query)
     
-    # Template response - miners should replace this with actual implementation
-    response = f"""Internet Search Service: UNAVAILABLE (Template)
-
-This is a template implementation. Miners should implement actual internet search.
-
-Queries received:
-{chr(10).join(f"- {q}" for q in search_queries)}
-
-IMPLEMENTATION NOTES FOR MINERS:
-==================================
-To implement internet search, you can use:
-
-1. Google Custom Search API:
-   - Create API key at: https://console.cloud.google.com/
-   - Use googleapis Python library
-   - Example: google.search(query, num_results=10)
-
-2. Bing Search API:
-   - Get API key from Azure Cognitive Services
-   - Use requests library to call Bing API
-
-3. DuckDuckGo API:
-   - Free and no API key required
-   - Use duckduckgo-search Python library
-   - Example: from duckduckgo_search import DDGS
-
-4. SerpAPI:
-   - Multi-engine search API
-   - Supports Google, Bing, Yahoo, etc.
-   - Example: serpapi.search(query)
-
-Implementation should:
-- Parse search queries from component_input.input
-- Execute searches using your chosen service
-- Format results as structured text
-- Return ComponentOutput with results
-- Handle rate limiting and errors gracefully
-
-Replace this function body with your actual search implementation."""
+    if not search_queries:
+        return ComponentOutput(
+            cid=component_input.cid,
+            task=component_input.task,
+            input=component_input.input,
+            output=ComponentOutputData(
+                immediate_response="No search queries provided.",
+                notebook="no update"
+            ),
+            component="internet_search"
+        )
+    
+    try:
+        from src.core.config import settings
+        
+        # Check if API keys are configured
+        if not settings.google_api_key or not settings.google_cx_key:
+            logger.error("[internet_search] Google API keys not configured")
+            response = "Google Custom Search API is not configured. Please set GOOGLE_API_KEY and GOOGLE_CX_KEY in .env file."
+        else:
+            # Initialize Google Search Client
+            search_client = GoogleSearchClient()
+            
+            # Perform search (use search_many for multiple queries, asearch for single)
+            if len(search_queries) == 1:
+                results = await search_client.asearch(search_queries[0], num_results=7)
+            else:
+                results = await search_client.search_many(search_queries, num_results=5)
+            
+            if not results:
+                response = f"No search results found for: {', '.join(search_queries)}"
+            else:
+                # Format search results
+                result_lines = [f"Search results for: {', '.join(search_queries)}\n"]
+                
+                for idx, result in enumerate(results[:7], 1):  # Limit to 7 results
+                    # Skip YouTube results
+                    if "youtube.com" in result.get("url", ""):
+                        continue
+                    
+                    title = result.get("title", "No title")
+                    url = result.get("url", "")
+                    snippet = result.get("snippet", "No description")
+                    
+                    result_lines.append(f"{idx}. {title}")
+                    result_lines.append(f"   URL: {url}")
+                    result_lines.append(f"   {snippet}")
+                    result_lines.append("")
+                
+                response = "\n".join(result_lines)
+                logger.info(f"[internet_search] Found {len(results)} results")
+                    
+    except httpx.HTTPStatusError as e:
+        logger.error(f"[internet_search] HTTP error: {e}")
+        response = f"HTTP error while searching: {str(e)}. Please check your API keys and internet connection."
+    except httpx.RequestError as e:
+        logger.error(f"[internet_search] Network error: {e}")
+        response = f"Network error while searching: {str(e)}. Please check your internet connection."
+    except Exception as e:
+        logger.error(f"[internet_search] Unexpected error: {e}", exc_info=True)
+        response = f"Unexpected error during search: {str(e)}"
     
     # Store in conversation history
     context.add_user_message(f"Search: {', '.join(search_queries)}")
     context.add_assistant_message(response)
-    
-
     
     # Internet search is conversational - no notebook editing
     return ComponentOutput(
@@ -749,29 +882,7 @@ Respond in JSON format."""
     )
     
     # Parse JSON response
-    try:
-        response_text = response.strip()
-        if "```json" in response_text:
-            response_text = response_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in response_text:
-            response_text = response_text.split("```")[1].split("```")[0].strip()
-        
-        result = json.loads(response_text)
-        immediate_response = result.get("immediate_response", response)
-        notebook_output = result.get("notebook", "no update")
-        
-        # Ensure notebook is a string
-        if isinstance(notebook_output, dict):
-            logger.warning(f"[summary] Notebook returned as dict, converting to JSON string")
-            notebook_output = json.dumps(notebook_output, indent=2)
-        elif not isinstance(notebook_output, str):
-            logger.warning(f"[summary] Notebook is not a string (type: {type(notebook_output)}), converting")
-            notebook_output = str(notebook_output)
-            
-    except (json.JSONDecodeError, IndexError) as e:
-        logger.warning(f"[summary] Failed to parse JSON response: {e}. Using raw response.")
-        immediate_response = response
-        notebook_output = "no update"
+    immediate_response, notebook_output = parse_json_response(response, "summary")
     
     # Resolve "no update" for notebook - return previous notebook if exists
     if notebook_output == "no update" and component_input.previous_outputs:
@@ -894,29 +1005,7 @@ Respond in JSON format."""
     )
     
     # Parse JSON response
-    try:
-        response_text = response.strip()
-        if "```json" in response_text:
-            response_text = response_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in response_text:
-            response_text = response_text.split("```")[1].split("```")[0].strip()
-        
-        result = json.loads(response_text)
-        immediate_response = result.get("immediate_response", response)
-        notebook_output = result.get("notebook", "no update")
-        
-        # Ensure notebook is a string
-        if isinstance(notebook_output, dict):
-            logger.warning(f"[aggregate] Notebook returned as dict, converting to JSON string")
-            notebook_output = json.dumps(notebook_output, indent=2)
-        elif not isinstance(notebook_output, str):
-            logger.warning(f"[aggregate] Notebook is not a string (type: {type(notebook_output)}), converting")
-            notebook_output = str(notebook_output)
-            
-    except (json.JSONDecodeError, IndexError) as e:
-        logger.warning(f"[aggregate] Failed to parse JSON response: {e}. Using raw response.")
-        immediate_response = response
-        notebook_output = "no update"
+    immediate_response, notebook_output = parse_json_response(response, "aggregate")
     
     # Resolve "no update" for notebook - return previous notebook if exists
     if notebook_output == "no update" and component_input.previous_outputs:

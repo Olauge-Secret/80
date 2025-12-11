@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     # Gradio Test UI Configuration
     api_base_url: Optional[str] = None
     
+    # Google Custom Search API Configuration
+    google_api_key: str = ""  # Google Custom Search API key
+    google_cx_key: str = ""  # Google Custom Search Engine ID (CX)
+    
     # Database Configuration (SQLite)
     database_url: str = "sqlite:///./data/miner_api.db"
     database_pool_size: int = 10

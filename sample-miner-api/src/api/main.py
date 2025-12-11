@@ -65,7 +65,11 @@ from src.services.components import (
 )
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 logger = logging.getLogger(__name__)
 
 # Initialize rate limiter
@@ -160,89 +164,110 @@ async def timeout_middleware(request: Request, call_next):
 @app.get("/")
 async def root():
     """Root endpoint with API information."""
-    return {
-        "name": "Sample Miner API",
-        "status": "running",
-        "architecture": "Unified component interface with conversation history",
-        "endpoints": {
-            "complete": "/complete - Process tasks with conversation history",
-            "refine": "/refine - Refine outputs based on previous results",
-            "feedback": "/feedback - Analyze outputs and provide feedback",
-            "human_feedback": "/human_feedback - Acknowledge user feedback",
-            "internet_search": "/internet_search - Search internet (template)",
-            "summary": "/summary - Summarize previous outputs",
-            "aggregate": "/aggregate - Majority voting on outputs"
-        },
-        "conversation_management": {
-            "list_conversations": "GET /conversations - List all conversations (requires auth)",
-            "get_conversation": "GET /conversations/{cid} - Get conversation history (requires auth)",
-            "delete_conversation": "DELETE /conversations/{cid} - Delete conversation (requires auth)"
-        },
-        "playbook_endpoints": {
-            "get_playbook": "GET /playbook/{cid} - Get playbook entries (requires auth)",
-            "get_playbook_context": "GET /playbook/{cid}/context - Get formatted playbook context (requires auth)"
-        },
-        "other_endpoints": {
-            "capabilities": "/capabilities - Get miner capabilities",
-            "health": "/health - Health check",
-            "docs": "/docs - API documentation"
-        },
-        "features": {
-            "conversation_history": "Stores max 10 recent messages per conversation",
-            "auto_cleanup": "Deletes messages older than 1 week",
-            "unified_interface": "All components use same input/output pattern"
+    logger.info("GET / - Root endpoint accessed")
+    try:
+        response = {
+            "name": "Sample Miner API",
+            "status": "running",
+            "architecture": "Unified component interface with conversation history",
+            "endpoints": {
+                "complete": "/complete - Process tasks with conversation history",
+                "refine": "/refine - Refine outputs based on previous results",
+                "feedback": "/feedback - Analyze outputs and provide feedback",
+                "human_feedback": "/human_feedback - Acknowledge user feedback",
+                "internet_search": "/internet_search - Search internet (template)",
+                "summary": "/summary - Summarize previous outputs",
+                "aggregate": "/aggregate - Majority voting on outputs"
+            },
+            "conversation_management": {
+                "list_conversations": "GET /conversations - List all conversations (requires auth)",
+                "get_conversation": "GET /conversations/{cid} - Get conversation history (requires auth)",
+                "delete_conversation": "DELETE /conversations/{cid} - Delete conversation (requires auth)"
+            },
+            "playbook_endpoints": {
+                "get_playbook": "GET /playbook/{cid} - Get playbook entries (requires auth)",
+                "get_playbook_context": "GET /playbook/{cid}/context - Get formatted playbook context (requires auth)"
+            },
+            "other_endpoints": {
+                "capabilities": "/capabilities - Get miner capabilities",
+                "health": "/health - Health check",
+                "docs": "/docs - API documentation"
+            },
+            "features": {
+                "conversation_history": "Stores max 10 recent messages per conversation",
+                "auto_cleanup": "Deletes messages older than 1 week",
+                "unified_interface": "All components use same input/output pattern"
+            }
         }
-    }
+        logger.info("GET / - Root endpoint completed successfully")
+        return response
+    except Exception as e:
+        logger.error(f"GET / - Error in root endpoint: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
-    stats = conversation_manager.get_stats()
-    return {
-        "status": "healthy",
-        "llm_provider": settings.llm_provider,
-        "model": settings.get_model_name,
-        "active_conversations": stats["total_conversations"],
-        "features": {
-            "unified_api": True,
-            "conversation_history": True,
-            "playbook_system": True
+    logger.info("GET /health - Health check endpoint accessed")
+    try:
+        stats = conversation_manager.get_stats()
+        response = {
+            "status": "healthy",
+            "llm_provider": settings.llm_provider,
+            "model": settings.get_model_name,
+            "active_conversations": stats["total_conversations"],
+            "features": {
+                "unified_api": True,
+                "conversation_history": True,
+                "playbook_system": True
+            }
         }
-    }
+        logger.info(f"GET /health - Health check completed: {stats['total_conversations']} active conversations")
+        return response
+    except Exception as e:
+        logger.error(f"GET /health - Error in health check: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/capabilities", dependencies=[Depends(optional_api_key)])
 async def get_capabilities():
     """Get miner capabilities and supported functions."""
-    return {
-        "miner_name": settings.miner_name,
-        "llm_provider": settings.llm_provider,
-        "model": settings.get_model_name,
-        "conversation_history_enabled": True,
-        "max_conversation_messages": settings.max_conversation_messages,
-        "message_retention_days": settings.conversation_cleanup_days,
-        "components": [
-            "complete",
-            "refine",
-            "feedback",
-            "human_feedback",
-            "internet_search",
-            "summary",
-            "aggregate"
-        ],
-        "features": {
-            "unified_component_interface": True,
-            "conversation_history": True,
-            "auto_message_cleanup": True,
-            "internet_search_template": True,
-            "llm_summary": True,
-            "majority_voting": True,
-            "privacy_friendly": True,
-            "multi_provider_support": True,
-            "quantized_model_friendly": True
+    logger.info("GET /capabilities - Capabilities endpoint accessed")
+    try:
+        response = {
+            "miner_name": settings.miner_name,
+            "llm_provider": settings.llm_provider,
+            "model": settings.get_model_name,
+            "conversation_history_enabled": True,
+            "max_conversation_messages": settings.max_conversation_messages,
+            "message_retention_days": settings.conversation_cleanup_days,
+            "components": [
+                "complete",
+                "refine",
+                "feedback",
+                "human_feedback",
+                "internet_search",
+                "summary",
+                "aggregate"
+            ],
+            "features": {
+                "unified_component_interface": True,
+                "conversation_history": True,
+                "auto_message_cleanup": True,
+                "internet_search_template": True,
+                "llm_summary": True,
+                "majority_voting": True,
+                "privacy_friendly": True,
+                "multi_provider_support": True,
+                "quantized_model_friendly": True
+            }
         }
-    }
+        logger.info(f"GET /capabilities - Capabilities retrieved for miner: {settings.miner_name}")
+        return response
+    except Exception as e:
+        logger.error(f"GET /capabilities - Error retrieving capabilities: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============================================================================
@@ -264,11 +289,15 @@ async def complete_component(request: Request, component_input: ComponentInput):
     
     Rate limit: 20 requests per minute per IP address.
     """
+    logger.info(f"POST /complete - Request received for cid: {component_input.cid}, task: {component_input.task}")
     try:
         context = conversation_manager.get_or_create(component_input.cid)
-        return await component_complete(component_input, context)
+        logger.debug(f"POST /complete - Conversation context retrieved for cid: {component_input.cid}")
+        result = await component_complete(component_input, context)
+        logger.info(f"POST /complete - Successfully completed task for cid: {component_input.cid}, component: {result.component}")
+        return result
     except Exception as e:
-        logger.error(f"Error in complete: {str(e)}", exc_info=True)
+        logger.error(f"POST /complete - Error in complete endpoint for cid: {component_input.cid}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -283,11 +312,15 @@ async def refine_component(request: Request, component_input: ComponentInput):
     
     Rate limit: 20 requests per minute per IP address.
     """
+    logger.info(f"POST /refine - Request received for cid: {component_input.cid}, task: {component_input.task}, previous_outputs count: {len(component_input.previous_outputs) if component_input.previous_outputs else 0}")
     try:
         context = conversation_manager.get_or_create(component_input.cid)
-        return await component_refine(component_input, context)
+        logger.debug(f"POST /refine - Conversation context retrieved for cid: {component_input.cid}")
+        result = await component_refine(component_input, context)
+        logger.info(f"POST /refine - Successfully refined output for cid: {component_input.cid}, component: {result.component}")
+        return result
     except Exception as e:
-        logger.error(f"Error in refine: {str(e)}", exc_info=True)
+        logger.error(f"POST /refine - Error in refine endpoint for cid: {component_input.cid}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -302,11 +335,15 @@ async def feedback_component(request: Request, component_input: ComponentInput):
     
     Rate limit: 20 requests per minute per IP address.
     """
+    logger.info(f"POST /feedback - Request received for cid: {component_input.cid}, task: {component_input.task}, previous_outputs count: {len(component_input.previous_outputs) if component_input.previous_outputs else 0}")
     try:
         context = conversation_manager.get_or_create(component_input.cid)
-        return await component_feedback(component_input, context)
+        logger.debug(f"POST /feedback - Conversation context retrieved for cid: {component_input.cid}")
+        result = await component_feedback(component_input, context)
+        logger.info(f"POST /feedback - Successfully generated feedback for cid: {component_input.cid}, component: {result.component}")
+        return result
     except Exception as e:
-        logger.error(f"Error in feedback: {str(e)}", exc_info=True)
+        logger.error(f"POST /feedback - Error in feedback endpoint for cid: {component_input.cid}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -321,11 +358,16 @@ async def human_feedback_component(request: Request, component_input: ComponentI
     
     Rate limit: 30 requests per minute per IP address (higher limit for feedback).
     """
+    input_count = len(component_input.input) if component_input.input else 0
+    logger.info(f"POST /human_feedback - Request received for cid: {component_input.cid}, task: {component_input.task}, input items: {input_count}")
     try:
         context = conversation_manager.get_or_create(component_input.cid)
-        return await component_human_feedback(component_input, context)
+        logger.debug(f"POST /human_feedback - Conversation context retrieved for cid: {component_input.cid}")
+        result = await component_human_feedback(component_input, context)
+        logger.info(f"POST /human_feedback - Successfully processed human feedback for cid: {component_input.cid}, component: {result.component}")
+        return result
     except Exception as e:
-        logger.error(f"Error in human_feedback: {str(e)}", exc_info=True)
+        logger.error(f"POST /human_feedback - Error in human_feedback endpoint for cid: {component_input.cid}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -344,11 +386,15 @@ async def internet_search_component(request: Request, component_input: Component
     
     See the implementation in src/services/components.py for detailed notes.
     """
+    logger.info(f"POST /internet_search - Request received for cid: {component_input.cid}, task: {component_input.task}")
     try:
         context = conversation_manager.get_or_create(component_input.cid)
-        return await component_internet_search(component_input, context)
+        logger.debug(f"POST /internet_search - Conversation context retrieved for cid: {component_input.cid}")
+        result = await component_internet_search(component_input, context)
+        logger.info(f"POST /internet_search - Internet search completed for cid: {component_input.cid}, component: {result.component}")
+        return result
     except Exception as e:
-        logger.error(f"Error in internet_search: {str(e)}", exc_info=True)
+        logger.error(f"POST /internet_search - Error in internet_search endpoint for cid: {component_input.cid}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -361,11 +407,16 @@ async def summary_component(request: Request, component_input: ComponentInput):
     Takes multiple previous outputs (from previous_outputs field) and creates
     a concise, comprehensive summary that captures main points and key insights.
     """
+    previous_outputs_count = len(component_input.previous_outputs) if component_input.previous_outputs else 0
+    logger.info(f"POST /summary - Request received for cid: {component_input.cid}, task: {component_input.task}, previous_outputs count: {previous_outputs_count}")
     try:
         context = conversation_manager.get_or_create(component_input.cid)
-        return await component_summary(component_input, context)
+        logger.debug(f"POST /summary - Conversation context retrieved for cid: {component_input.cid}")
+        result = await component_summary(component_input, context)
+        logger.info(f"POST /summary - Successfully generated summary for cid: {component_input.cid}, component: {result.component}")
+        return result
     except Exception as e:
-        logger.error(f"Error in summary: {str(e)}", exc_info=True)
+        logger.error(f"POST /summary - Error in summary endpoint for cid: {component_input.cid}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -378,11 +429,16 @@ async def aggregate_component(request: Request, component_input: ComponentInput)
     Analyzes multiple previous outputs (from previous_outputs field) and
     determines the consensus answer through majority voting logic.
     """
+    previous_outputs_count = len(component_input.previous_outputs) if component_input.previous_outputs else 0
+    logger.info(f"POST /aggregate - Request received for cid: {component_input.cid}, task: {component_input.task}, previous_outputs count: {previous_outputs_count}")
     try:
         context = conversation_manager.get_or_create(component_input.cid)
-        return await component_aggregate(component_input, context)
+        logger.debug(f"POST /aggregate - Conversation context retrieved for cid: {component_input.cid}")
+        result = await component_aggregate(component_input, context)
+        logger.info(f"POST /aggregate - Successfully aggregated outputs for cid: {component_input.cid}, component: {result.component}")
+        return result
     except Exception as e:
-        logger.error(f"Error in aggregate: {str(e)}", exc_info=True)
+        logger.error(f"POST /aggregate - Error in aggregate endpoint for cid: {component_input.cid}: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -398,16 +454,19 @@ async def list_all_conversations(request: Request):
     Returns:
         Dict with list of conversations and total count
     """
+    logger.info("GET /conversations - Request to list all conversations")
     try:
         # Get stats directly from conversation manager (uses database)
         stats = conversation_manager.get_stats()
         
-        return {
+        response = {
             "total_conversations": stats["total_conversations"],
             "conversations": stats["conversations"]
         }
+        logger.info(f"GET /conversations - Successfully retrieved {stats['total_conversations']} conversations")
+        return response
     except Exception as e:
-        logger.error(f"Error listing conversations: {str(e)}", exc_info=True)
+        logger.error(f"GET /conversations - Error listing conversations: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -425,19 +484,22 @@ async def get_conversation_history(request: Request, cid: str):
     Returns:
         Dict with conversation metadata and complete message history
     """
+    logger.info(f"GET /conversations/{cid} - Request to get conversation history")
     try:
         context = conversation_manager.get_or_create(cid)
         messages = context.get_messages()
         
-        return {
+        response = {
             "cid": cid,
             "message_count": len(messages),
             "messages": messages,
             "created_at": context.created_at.isoformat() if hasattr(context, 'created_at') else None,
             "last_activity": context.last_activity.isoformat() if hasattr(context, 'last_activity') else None
         }
+        logger.info(f"GET /conversations/{cid} - Successfully retrieved conversation with {len(messages)} messages")
+        return response
     except Exception as e:
-        logger.error(f"Error retrieving conversation {cid}: {str(e)}", exc_info=True)
+        logger.error(f"GET /conversations/{cid} - Error retrieving conversation: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -455,11 +517,13 @@ async def delete_conversation(request: Request, cid: str):
     Returns:
         Success message
     """
+    logger.info(f"DELETE /conversations/{cid} - Request to delete conversation")
     try:
         # Check if conversation exists in database
         context = conversation_manager.get(cid)
         
         if context is None:
+            logger.warning(f"DELETE /conversations/{cid} - Conversation not found")
             raise HTTPException(
                 status_code=404,
                 detail=f"Conversation {cid} not found"
@@ -467,17 +531,18 @@ async def delete_conversation(request: Request, cid: str):
         
         # Delete from database
         conversation_manager.delete(cid)
-        logger.info(f"Deleted conversation {cid} from database")
+        logger.info(f"DELETE /conversations/{cid} - Successfully deleted conversation from database")
         
-        return {
+        response = {
             "success": True,
             "message": f"Conversation {cid} deleted successfully",
             "cid": cid
         }
+        return response
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error deleting conversation {cid}: {str(e)}", exc_info=True)
+        logger.error(f"DELETE /conversations/{cid} - Error deleting conversation: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -496,19 +561,22 @@ async def get_playbook(request: Request, cid: str):
     Returns:
         Dict with playbook entries and metadata
     """
+    logger.info(f"GET /playbook/{cid} - Request to get playbook entries")
     try:
         from src.services.components import get_playbook_service
         
         playbook_service = get_playbook_service()
         entries = await playbook_service.get_playbook(cid)
         
-        return {
+        response = {
             "cid": cid,
             "entry_count": len(entries),
             "entries": entries
         }
+        logger.info(f"GET /playbook/{cid} - Successfully retrieved {len(entries)} playbook entries")
+        return response
     except Exception as e:
-        logger.error(f"Error retrieving playbook for {cid}: {str(e)}", exc_info=True)
+        logger.error(f"GET /playbook/{cid} - Error retrieving playbook: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -527,6 +595,7 @@ async def get_playbook_context(request: Request, cid: str):
     Returns:
         Dict with formatted context string
     """
+    logger.info(f"GET /playbook/{cid}/context - Request to get formatted playbook context")
     try:
         from src.services.components import get_playbook_service
         
@@ -538,14 +607,16 @@ async def get_playbook_context(request: Request, cid: str):
         else:
             context = "No playbook entries found for this conversation."
         
-        return {
+        response = {
             "cid": cid,
             "entry_count": len(entries),
             "formatted_context": context,
             "entries": entries
         }
+        logger.info(f"GET /playbook/{cid}/context - Successfully retrieved and formatted {len(entries)} playbook entries")
+        return response
     except Exception as e:
-        logger.error(f"Error retrieving playbook context for {cid}: {str(e)}", exc_info=True)
+        logger.error(f"GET /playbook/{cid}/context - Error retrieving playbook context: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

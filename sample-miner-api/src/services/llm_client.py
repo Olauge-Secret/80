@@ -159,6 +159,7 @@ class LLMClient:
             }
             
             logger.info(f"Successfully generated response. Tokens used: {result['tokens_used']}")
+            logger.info(f"Response: {result['response']}")
             return result
             
         except OpenAIError as e:
