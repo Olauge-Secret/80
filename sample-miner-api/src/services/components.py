@@ -79,6 +79,56 @@ async def get_context_additions(
     return conversation_history, playbook_context
 
 
+def _extract_notebook_content(notebook_value, component_name: str) -> str:
+    """
+    Extract notebook content from various formats (dict, JSON string, etc.).
+    
+    Args:
+        notebook_value: The notebook value (can be dict, str, list, etc.)
+        component_name: Name of component (for logging)
+        
+    Returns:
+        Notebook content as a string
+    """
+    if isinstance(notebook_value, dict):
+        # If it's a dict with 'content' field, extract that
+        if "content" in notebook_value:
+            content = notebook_value["content"]
+            # If content is a list, join it
+            if isinstance(content, list):
+                return "\n\n".join(str(item) for item in content)
+            return str(content)
+        # If it's a dict with 'title' and 'content', prefer content
+        elif "title" in notebook_value and "content" in notebook_value:
+            content = notebook_value["content"]
+            if isinstance(content, list):
+                return "\n\n".join(str(item) for item in content)
+            return str(content)
+        # Otherwise, convert dict to formatted JSON string
+        logger.info(f"[{component_name}] Notebook is dict, converting to JSON string")
+        return json.dumps(notebook_value, indent=2)
+    elif isinstance(notebook_value, str):
+        # Check if notebook is a JSON-encoded string (double-encoded)
+        notebook_stripped = notebook_value.strip()
+        if notebook_stripped.startswith(("{", "[")) and notebook_stripped.endswith(("}", "]")):
+            try:
+                # Try to parse the JSON string
+                parsed_notebook = json.loads(notebook_value)
+                # Recursively extract content
+                return _extract_notebook_content(parsed_notebook, component_name)
+            except json.JSONDecodeError:
+                # Not valid JSON, keep as-is
+                logger.debug(f"[{component_name}] Notebook string looks like JSON but failed to parse, keeping as-is")
+                return notebook_value
+        return notebook_value
+    elif isinstance(notebook_value, list):
+        # If it's a list, join items
+        return "\n\n".join(str(item) for item in notebook_value)
+    else:
+        # Convert to string
+        return str(notebook_value)
+
+
 def parse_json_response(response: str, component_name: str) -> tuple[str, str]:
     """
     Parse JSON response from LLM, handling various formats.
@@ -90,6 +140,28 @@ def parse_json_response(response: str, component_name: str) -> tuple[str, str]:
     Returns:
         Tuple of (immediate_response, notebook_output)
     """
+    # Helper function to try parsing a JSON string recursively
+    def try_parse_json_string(value: str) -> tuple[Optional[str], Optional[str]]:
+        """Try to parse a JSON string that might contain the actual response."""
+        if not isinstance(value, str):
+            return None, None
+        
+        value_stripped = value.strip()
+        if not (value_stripped.startswith("{") and value_stripped.endswith("}")):
+            return None, None
+        
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, dict):
+                inner_immediate = parsed.get("immediate_response")
+                inner_notebook = parsed.get("notebook")
+                if inner_immediate is not None or inner_notebook is not None:
+                    return inner_immediate, inner_notebook
+        except json.JSONDecodeError:
+            pass
+        
+        return None, None
+    
     try:
         # Try to extract JSON from response (handle markdown code blocks and extra text)
         response_text = response.strip()
@@ -126,13 +198,16 @@ def parse_json_response(response: str, component_name: str) -> tuple[str, str]:
         immediate_response = result.get("immediate_response", response)
         notebook_output = result.get("notebook", "no update")
         
-        # Ensure notebook is a string (convert dict/object to JSON string if needed)
-        if isinstance(notebook_output, dict):
-            logger.info(f"[{component_name}] Notebook returned as dict, converting to JSON string")
-            notebook_output = json.dumps(notebook_output, indent=2)
-        elif not isinstance(notebook_output, str):
-            logger.info(f"[{component_name}] Notebook is not a string (type: {type(notebook_output)}), converting")
-            notebook_output = str(notebook_output)
+        # Check if immediate_response is itself a JSON-encoded string (double-encoded)
+        inner_immediate, inner_notebook = try_parse_json_string(immediate_response)
+        if inner_immediate is not None:
+            logger.info(f"[{component_name}] Found JSON-encoded immediate_response, extracting inner content")
+            immediate_response = inner_immediate
+            if inner_notebook is not None:
+                notebook_output = inner_notebook
+        
+        # Extract notebook content using helper function
+        notebook_output = _extract_notebook_content(notebook_output, component_name)
         
         logger.debug(f"[{component_name}] Successfully parsed JSON response")
         return immediate_response, notebook_output
@@ -140,24 +215,87 @@ def parse_json_response(response: str, component_name: str) -> tuple[str, str]:
     except (json.JSONDecodeError, IndexError, ValueError) as e:
         logger.warning(f"[{component_name}] Failed to parse JSON response: {e}")
         logger.debug(f"[{component_name}] Response text (first 500 chars): {response[:500]}")
-        # Try one more time with just finding the JSON object
-        try:
-            first_brace = response.find("{")
-            last_brace = response.rfind("}")
-            if first_brace != -1 and last_brace != -1:
-                json_text = response[first_brace:last_brace + 1]
-                result = json.loads(json_text)
-                immediate_response = result.get("immediate_response", response)
-                notebook_output = result.get("notebook", "no update")
-                if isinstance(notebook_output, dict):
-                    notebook_output = json.dumps(notebook_output, indent=2)
-                logger.info(f"[{component_name}] Successfully parsed JSON after fallback extraction")
-                return immediate_response, notebook_output
-            else:
-                raise
-        except Exception:
-            logger.warning(f"[{component_name}] All JSON parsing attempts failed. Using raw response.")
-            return response, "no update"
+        
+        # Fallback: Try multiple strategies
+        fallback_strategies = [
+            # Strategy 1: Find JSON object boundaries
+            lambda: (response[response.find("{"):response.rfind("}") + 1] if response.find("{") != -1 and response.rfind("}") != -1 else None),
+            # Strategy 2: Try to find last complete JSON object
+            lambda: _find_last_json_object(response),
+            # Strategy 3: Try to find first complete JSON object
+            lambda: _find_first_json_object(response),
+        ]
+        
+        for strategy_idx, strategy in enumerate(fallback_strategies, 1):
+            try:
+                json_text = strategy()
+                if json_text:
+                    result = json.loads(json_text)
+                    immediate_response = result.get("immediate_response", response)
+                    notebook_output = result.get("notebook", "no update")
+                    
+                    # Check if immediate_response is itself a JSON-encoded string
+                    inner_immediate, inner_notebook = try_parse_json_string(immediate_response)
+                    if inner_immediate is not None:
+                        logger.info(f"[{component_name}] Fallback {strategy_idx}: Found JSON-encoded immediate_response")
+                        immediate_response = inner_immediate
+                        if inner_notebook is not None:
+                            notebook_output = inner_notebook
+                    
+                    # Extract notebook content
+                    notebook_output = _extract_notebook_content(notebook_output, component_name)
+                    
+                    logger.info(f"[{component_name}] Successfully parsed JSON using fallback strategy {strategy_idx}")
+                    return immediate_response, notebook_output
+            except Exception as fallback_error:
+                logger.debug(f"[{component_name}] Fallback strategy {strategy_idx} failed: {fallback_error}")
+                continue
+        
+        # All strategies failed
+        logger.warning(f"[{component_name}] All JSON parsing attempts failed. Using raw response.")
+        return response, "no update"
+
+
+def _find_last_json_object(text: str) -> Optional[str]:
+    """Find the last complete JSON object in text by matching braces."""
+    if "}" not in text:
+        return None
+    
+    last_brace = text.rfind("}")
+    depth = 0
+    start_pos = last_brace
+    
+    # Find matching opening brace
+    for i in range(last_brace, -1, -1):
+        if text[i] == "}":
+            depth += 1
+        elif text[i] == "{":
+            depth -= 1
+            if depth == 0:
+                return text[i:last_brace + 1]
+    
+    return None
+
+
+def _find_first_json_object(text: str) -> Optional[str]:
+    """Find the first complete JSON object in text by matching braces."""
+    if "{" not in text:
+        return None
+    
+    first_brace = text.find("{")
+    depth = 0
+    start_pos = first_brace
+    
+    # Find matching closing brace
+    for i in range(first_brace, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[first_brace:i + 1]
+    
+    return None
 
 
 
