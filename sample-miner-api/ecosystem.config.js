@@ -3,7 +3,7 @@ module.exports = {
       name: 'miner-8000',
       cwd: '/home/ubuntu/snap/80/8000/sample-miner-api',
       script: '/home/ubuntu/snap/80/.venv/bin/python',
-      args: 'run.py --port 8000 --provider chute --save-messages',
+      args: 'run.py --port 8000 --provider vllm --save-messages',
       interpreter: 'none',
       instances: 1,
       autorestart: true,
