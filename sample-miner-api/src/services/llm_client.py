@@ -170,6 +170,29 @@ def _save_messages(
     _messages_logger.info(json.dumps(log_entry, ensure_ascii=False))
 
 
+def estimate_tokens(text: str) -> int:
+    """
+    Estimate the number of tokens in a text string.
+    
+    Uses a conservative approximation: roughly 1 token per 3 characters.
+    This is more accurate for many tokenizers and accounts for:
+    - Multi-byte characters
+    - Special tokens
+    - Tokenizer-specific behavior
+    
+    Args:
+        text: The text to estimate tokens for
+        
+    Returns:
+        Estimated number of tokens
+    """
+    if not text:
+        return 0
+    # Conservative estimate: 1 token per 3 characters (more accurate for many models)
+    # This accounts for multi-byte characters and special tokens
+    return len(text) // 3
+
+
 def strip_reasoning_tags(text: str) -> str:
     """
     Remove reasoning/thinking tags from LLM responses.
@@ -334,6 +357,43 @@ class LLMClient:
             
             logger.info(f"Prepared {len(messages)} messages for {self.provider.upper()} API")
             
+            # Special handling for vLLM provider
+            if self.provider == "vllm":
+                # Estimate input tokens (including message formatting overhead)
+                input_token_count = 0
+                for msg in messages:
+                    content = msg.get("content", "")
+                    if isinstance(content, str):
+                        # Estimate tokens for content
+                        content_tokens = estimate_tokens(content)
+                        # Add overhead for message formatting (role tags, JSON structure, etc.)
+                        # Roughly 5-10 tokens per message for formatting
+                        input_token_count += content_tokens + 8
+                
+                # Add instruction to the last user message about token limit
+                # First calculate a preliminary max_tokens for the note
+                safety_margin = int(input_token_count * 0.15)
+                preliminary_max = max(1, 4096 - input_token_count - safety_margin)
+                
+                if messages and messages[-1].get("role") == "user":
+                    token_limit_note = f"\n\n[Note: Please limit your response to approximately {preliminary_max} tokens to stay within the total token budget of 4096 tokens.]"
+                    messages[-1]["content"] = messages[-1]["content"] + token_limit_note
+                    # Update input token count to include the note
+                    note_tokens = estimate_tokens(token_limit_note) + 8  # +8 for message formatting
+                    input_token_count += note_tokens
+                
+                # Calculate final max_tokens: 4096 - input_token_count
+                # Add a safety margin of 15% to account for estimation errors
+                safety_margin = int(input_token_count * 0.15)
+                adjusted_input_tokens = input_token_count + safety_margin
+                calculated_max_tokens = max(1, 4096 - adjusted_input_tokens)
+                
+                logger.info(f"vLLM: Estimated input tokens: {input_token_count} (with safety margin: {adjusted_input_tokens}), Setting max_tokens to: {calculated_max_tokens}")
+                
+                # Use calculated max_tokens if not explicitly provided
+                if max_tokens is None:
+                    max_tokens = calculated_max_tokens
+            
             # Prepare API parameters
             # GPT-5 and newer models have different API requirements
             is_gpt5 = "gpt-5" in self.model.lower() or "o1" in self.model.lower()
@@ -354,6 +414,9 @@ class LLMClient:
             # Add response format if provided (for JSON mode)
             if response_format:
                 params["response_format"] = response_format
+            
+            # For vLLM, ensure we only send necessary fields (like openai and chute)
+            # The params dict already only contains necessary fields, so no filtering needed
             
             # Make API call with timing
             logger.info(f"Calling {self.provider.upper()} API with model: {self.model}")

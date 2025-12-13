@@ -342,7 +342,9 @@ async def component_complete(
     # Build system prompt with Canvas-style instructions
     system_prompt = """You are an intelligent AI assistant that helps users complete tasks.
 
-IMPORTANT: Respond in JSON format with two fields:
+CRITICAL: You MUST respond with ONLY valid JSON. No markdown code blocks, no explanations outside JSON, no extra text.
+
+Required JSON format:
 {
   "immediate_response": "Your natural language explanation of what you did or your answer",
   "notebook": "Updated notebook content OR 'no update'"
@@ -354,7 +356,8 @@ Guidelines for notebook field:
 - If there's ONE notebook and changes needed: Return the updated version
 - If there are MULTIPLE notebooks: You MUST create new content (combine/choose/merge) - NEVER "no update"
 - If creating new notebook: Return the full content
-- Always provide valid JSON"""
+
+Your response must be ONLY the JSON object, nothing else."""
     
     if playbook_context:
         system_prompt += f"\n\nUser preferences and context:\n{playbook_context}"
@@ -373,7 +376,8 @@ Complete this task and respond in JSON format."""
         prompt=task_prompt,
         system_prompt=system_prompt,
         conversation_history=conversation_history,
-        temperature=0.7
+        temperature=0.7,
+        response_format={"type": "json_object"}
     )
     
     # Parse JSON response
@@ -449,7 +453,9 @@ async def component_refine(
     # Build system prompt with Canvas-style instructions
     system_prompt = """You are an AI assistant that refines and improves outputs.
 
-IMPORTANT: Respond in JSON format:
+CRITICAL: You MUST respond with ONLY valid JSON. No markdown code blocks, no explanations outside JSON, no extra text.
+
+Required JSON format:
 {
   "immediate_response": "Explanation of what you refined and why",
   "notebook": "The refined/improved content OR 'no update'"
@@ -460,7 +466,8 @@ Guidelines for notebook field:
 - If there's ONE notebook and no improvements needed: Set to "no update"
 - If there's ONE notebook and improvements needed: Write the improved version
 - If there are MULTIPLE notebooks: You MUST create new content (refine one, combine, or merge) - NEVER "no update"
-- Always provide valid JSON"""
+
+Your response must be ONLY the JSON object, nothing else."""
     
     if playbook_context:
         system_prompt += f"\n\nUser preferences:\n{playbook_context}"
@@ -479,7 +486,8 @@ Refine and improve the outputs. Respond in JSON format."""
         prompt=refine_prompt,
         system_prompt=system_prompt,
         conversation_history=conversation_history,
-        temperature=0.7
+        temperature=0.7,
+        response_format={"type": "json_object"}
     )
     
     # Parse JSON response
@@ -983,7 +991,9 @@ async def component_summary(
     # Build system prompt with Canvas-style instructions
     system_prompt = """You are an AI assistant that creates concise, comprehensive summaries.
 
-IMPORTANT: Respond in JSON format with two fields:
+CRITICAL: You MUST respond with ONLY valid JSON. No markdown code blocks, no explanations outside JSON, no extra text.
+
+Required JSON format:
 {
   "immediate_response": "Your summary explanation",
   "notebook": "Summarized notebook content OR 'no update'"
@@ -993,7 +1003,8 @@ Guidelines for notebook field:
 - If there's NO notebook content in inputs: Return "no update"
 - If there's ONE notebook to summarize: Return the summarized version
 - If there are MULTIPLE notebooks: Create a combined summary
-- Always provide valid JSON"""
+
+Your response must be ONLY the JSON object, nothing else."""
     
     if playbook_context:
         system_prompt += f"\n\nUser preferences:\n{playbook_context}"
@@ -1017,7 +1028,8 @@ Respond in JSON format."""
         prompt=summary_prompt,
         system_prompt=system_prompt,
         conversation_history=conversation_history,
-        temperature=0.5
+        temperature=0.5,
+        response_format={"type": "json_object"}
     )
     
     # Parse JSON response
@@ -1105,7 +1117,9 @@ async def component_aggregate(
     # Build system prompt with Canvas-style instructions
     system_prompt = """You are an AI assistant that aggregates multiple outputs using majority voting.
 
-IMPORTANT: Respond in JSON format with two fields:
+CRITICAL: You MUST respond with ONLY valid JSON. No markdown code blocks, no explanations outside JSON, no extra text.
+
+Required JSON format:
 {
   "immediate_response": "Your explanation of the consensus and voting results",
   "notebook": "The aggregated/consensus notebook content OR 'no update'"
@@ -1116,7 +1130,8 @@ Guidelines for notebook field:
 - If there's ONE notebook: Return it as-is (or "no update" if no changes)
 - If there are MULTIPLE notebooks: Create aggregated version using majority voting
 - Use majority voting: Choose the most common content or merge agreements
-- Always provide valid JSON"""
+
+Your response must be ONLY the JSON object, nothing else."""
     
     if playbook_context:
         system_prompt += f"\n\nUser preferences:\n{playbook_context}"
@@ -1140,7 +1155,8 @@ Respond in JSON format."""
         prompt=aggregate_prompt,
         system_prompt=system_prompt,
         conversation_history=conversation_history,
-        temperature=0.3
+        temperature=0.3,
+        response_format={"type": "json_object"}
     )
     
     # Parse JSON response

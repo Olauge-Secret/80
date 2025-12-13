@@ -23,8 +23,8 @@ class Settings(BaseSettings):
     openai_base_url: Optional[str] = None  # Optional custom base URL
     
     # vLLM Configuration (for self-hosted models)
-    vllm_base_url: str = "http://localhost:8000/v1"  # vLLM server URL
-    vllm_model: str = "hugging-quants/Meta-Llama-3.1-8B-Instruct-AWQ-INT4"
+    vllm_base_url: str = "http://62.117.108.166:9050/v1"  # vLLM server URL
+    vllm_model: str = "Qwen/Qwen2.5-Math-7B"
     vllm_api_key: str = ""  # Set via VLLM_API_KEY if using vLLM
     
     # Chute Configuration
