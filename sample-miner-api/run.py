@@ -82,7 +82,7 @@ Examples:
     
     parser.add_argument(
         "--provider",
-        choices=["openai", "chute"],
+        choices=["openai", "chute", "vllm", "claude"],
         default=default_provider,
         help=f"LLM provider to use (default from .env: {default_provider})"
     )

@@ -1,13 +1,14 @@
-"""LLM API client wrapper with support for OpenAI, vLLM, and Chute.
+"""LLM API client wrapper with support for OpenAI, vLLM, Chute, and Claude.
 
 This module provides a unified interface for interacting with Large Language Models
 through different providers:
 - OpenAI: Cloud-based API (GPT-4o, GPT-4-turbo, etc.)
 - vLLM: Self-hosted models (Llama, Qwen, Mistral, etc.)
 - Chute: Chute AI API (DeepSeek-R1, etc.)
+- Claude: Anthropic API (Claude Sonnet, etc.)
 
 The client automatically detects the provider from settings and provides
-an OpenAI-compatible interface for all.
+a unified interface for all providers.
 """
 
 import logging
@@ -170,6 +171,151 @@ def _save_messages(
     _messages_logger.info(json.dumps(log_entry, ensure_ascii=False))
 
 
+def estimate_tokens(text: str) -> int:
+    """
+    Estimate the number of tokens in a text string.
+    
+    Uses a conservative approximation: roughly 1 token per 3 characters.
+    This is more accurate for many tokenizers and accounts for:
+    - Multi-byte characters
+    - Special tokens
+    - Tokenizer-specific behavior
+    
+    Args:
+        text: The text to estimate tokens for
+        
+    Returns:
+        Estimated number of tokens
+    """
+    if not text:
+        return 0
+    # Conservative estimate: 1 token per 3 characters (more accurate for many models)
+    # This accounts for multi-byte characters and special tokens
+    return len(text) // 3
+
+
+def extract_json_from_response(text: str) -> str:
+    """
+    Extract JSON from response text, handling markdown code blocks and extra text.
+    
+    This function tries to find and extract valid JSON from a response that may contain:
+    - Markdown code blocks (```json ... ```)
+    - Extra text before/after JSON
+    - Reasoning or explanation text
+    
+    Args:
+        text: Response text that may contain JSON
+        
+    Returns:
+        Extracted JSON string, or original text if no JSON found
+    """
+    if not text:
+        return text
+    
+    text = text.strip()
+    
+    # Strategy 1: Try to find JSON in markdown code blocks (```json ... ```)
+    if "```json" in text:
+        start_idx = text.find("```json")
+        if start_idx != -1:
+            # Find the start of JSON content (after ```json and optional newline)
+            content_start = text.find("\n", start_idx + 7)
+            if content_start == -1:
+                content_start = start_idx + 7
+            else:
+                content_start += 1  # Skip the newline
+            
+            # Find the closing ```
+            end_idx = text.find("```", content_start)
+            if end_idx != -1:
+                json_part = text[content_start:end_idx].strip()
+                # Validate it's JSON
+                try:
+                    json.loads(json_part)
+                    return json_part
+                except json.JSONDecodeError:
+                    pass
+    
+    # Strategy 2: Try to find any code block that might contain JSON
+    if "```" in text:
+        # Find all code blocks
+        parts = text.split("```")
+        for i in range(1, len(parts), 2):  # Check every other part (code blocks)
+            if i >= len(parts):
+                break
+            try:
+                code_block = parts[i].strip()
+                # Remove language identifier if present (json, json\n, etc.)
+                if code_block.startswith("json"):
+                    # Find first newline after "json"
+                    nl_idx = code_block.find("\n")
+                    if nl_idx != -1:
+                        code_block = code_block[nl_idx + 1:].strip()
+                    else:
+                        code_block = code_block[4:].strip()
+                # Try to parse as JSON
+                parsed = json.loads(code_block)
+                # Validate it's an object with expected fields
+                if isinstance(parsed, dict) and ("immediate_response" in parsed or "notebook" in parsed):
+                    return code_block
+            except (json.JSONDecodeError, IndexError, ValueError):
+                continue
+    
+    # Strategy 3: Try to find last complete JSON object (most likely to be the actual response
+    # if there's reasoning text before it)
+    last_brace = text.rfind("}")
+    if last_brace != -1 and last_brace > 0:
+        # Work backwards to find matching opening brace
+        brace_count = 0
+        start_idx = -1
+        for i in range(last_brace, -1, -1):
+            if text[i] == "}":
+                brace_count += 1
+            elif text[i] == "{":
+                brace_count -= 1
+                if brace_count == 0:
+                    start_idx = i
+                    break
+        
+        if start_idx != -1:
+            json_candidate = text[start_idx:last_brace+1]
+            try:
+                parsed = json.loads(json_candidate)
+                # Validate it's an object with expected fields
+                if isinstance(parsed, dict) and ("immediate_response" in parsed or "notebook" in parsed):
+                    return json_candidate
+            except json.JSONDecodeError:
+                pass
+    
+    # Strategy 4: Try to find first complete JSON object (fallback)
+    first_brace = text.find("{")
+    if first_brace != -1:
+        # Find matching closing brace
+        brace_count = 0
+        end_idx = -1
+        for i in range(first_brace, len(text)):
+            if text[i] == "{":
+                brace_count += 1
+            elif text[i] == "}":
+                brace_count -= 1
+                if brace_count == 0:
+                    end_idx = i
+                    break
+        
+        if end_idx != -1:
+            json_candidate = text[first_brace:end_idx+1]
+            try:
+                parsed = json.loads(json_candidate)
+                # Validate it's an object with expected fields
+                if isinstance(parsed, dict) and ("immediate_response" in parsed or "notebook" in parsed):
+                    return json_candidate
+            except json.JSONDecodeError:
+                pass
+    
+    # If no JSON found, return original text
+    return text
+
+
 def strip_reasoning_tags(text: str) -> str:
     """
     Remove reasoning/thinking tags from LLM responses.
@@ -270,8 +416,16 @@ class LLMClient:
             )
             logger.info(f"Initialized Chute client at {settings.chutes_base_url} with model: {self.model} (with connection pooling)")
         
+        elif self.provider == "claude":
+            # Claude uses Anthropic API (different from OpenAI)
+            self.client = None  # Claude uses httpx directly, not OpenAI client
+            self.http_client = http_client
+            self.claude_api_key = settings.anthropic_api_key
+            self.claude_base_url = settings.claude_base_url
+            logger.info(f"Initialized Claude client at {self.claude_base_url} with model: {self.model} (with connection pooling)")
+        
         else:
-            raise ValueError(f"Unsupported LLM provider: {self.provider}. Use 'openai', 'vllm', or 'chute'.")
+            raise ValueError(f"Unsupported LLM provider: {self.provider}. Use 'openai', 'vllm', 'chute', or 'claude'.")
     
     async def generate_response(
         self,
@@ -334,6 +488,43 @@ class LLMClient:
             
             logger.info(f"Prepared {len(messages)} messages for {self.provider.upper()} API")
             
+            # Special handling for vLLM provider
+            if self.provider == "vllm":
+                # Estimate input tokens (including message formatting overhead)
+                input_token_count = 0
+                for msg in messages:
+                    content = msg.get("content", "")
+                    if isinstance(content, str):
+                        # Estimate tokens for content
+                        content_tokens = estimate_tokens(content)
+                        # Add overhead for message formatting (role tags, JSON structure, etc.)
+                        # Roughly 5-10 tokens per message for formatting
+                        input_token_count += content_tokens + 8
+                
+                # Add instruction to the last user message about token limit
+                # First calculate a preliminary max_tokens for the note
+                safety_margin = int(input_token_count * 0.15)
+                preliminary_max = max(1, 4096 - input_token_count - safety_margin)
+                
+                if messages and messages[-1].get("role") == "user":
+                    token_limit_note = f"\n\n[Note: Please limit your response to approximately {preliminary_max} tokens to stay within the total token budget of 4096 tokens.]"
+                    messages[-1]["content"] = messages[-1]["content"] + token_limit_note
+                    # Update input token count to include the note
+                    note_tokens = estimate_tokens(token_limit_note) + 8  # +8 for message formatting
+                    input_token_count += note_tokens
+                
+                # Calculate final max_tokens: 4096 - input_token_count
+                # Add a safety margin of 15% to account for estimation errors
+                safety_margin = int(input_token_count * 0.15)
+                adjusted_input_tokens = input_token_count + safety_margin
+                calculated_max_tokens = max(1, 4096 - adjusted_input_tokens)
+                
+                logger.info(f"vLLM: Estimated input tokens: {input_token_count} (with safety margin: {adjusted_input_tokens}), Setting max_tokens to: {calculated_max_tokens}")
+                
+                # Use calculated max_tokens if not explicitly provided
+                if max_tokens is None:
+                    max_tokens = calculated_max_tokens
+            
             # Prepare API parameters
             # GPT-5 and newer models have different API requirements
             is_gpt5 = "gpt-5" in self.model.lower() or "o1" in self.model.lower()
@@ -355,30 +546,129 @@ class LLMClient:
             if response_format:
                 params["response_format"] = response_format
             
-            # Make API call with timing
-            logger.info(f"Calling {self.provider.upper()} API with model: {self.model}")
-            start_time = time.perf_counter()
-            response = await self.client.chat.completions.create(**params)
-            inference_time = time.perf_counter() - start_time
+            # For vLLM, ensure we only send necessary fields (like openai and chute)
+            # The params dict already only contains necessary fields, so no filtering needed
             
-            # Extract response data
-            message = response.choices[0].message
-            raw_content = message.content or ""
-            
-            # Strip reasoning tags (like <think>...</think>)
-            cleaned_content = strip_reasoning_tags(raw_content)
-            
-            result = {
-                "response": cleaned_content,
-                "model": response.model,
-                "tokens_used": response.usage.total_tokens,
-                "finish_reason": response.choices[0].finish_reason
-            }
+            # Special handling for Claude API
+            if self.provider == "claude":
+                # Claude uses different API format
+                # Convert messages to Claude format
+                claude_messages = []
+                claude_system = None
+                
+                for msg in messages:
+                    role = msg.get("role", "user")
+                    content = msg.get("content", "")
+                    
+                    if role == "system":
+                        claude_system = content
+                    else:
+                        # Claude uses "user" and "assistant" roles
+                        claude_messages.append({
+                            "role": role if role in ["user", "assistant"] else "user",
+                            "content": content
+                        })
+                
+                # Prepare Claude API request
+                claude_payload = {
+                    "model": self.model,
+                    "max_tokens": max_tokens or settings.max_tokens,
+                    "messages": claude_messages
+                }
+                
+                if claude_system:
+                    claude_payload["system"] = claude_system
+                
+                if temperature is not None:
+                    claude_payload["temperature"] = temperature
+                else:
+                    claude_payload["temperature"] = settings.temperature
+                
+                # Make Claude API call
+                logger.info(f"Calling {self.provider.upper()} API with model: {self.model}")
+                start_time = time.perf_counter()
+                
+                claude_url = f"{self.claude_base_url}/messages"
+                claude_headers = {
+                    "Content-Type": "application/json",
+                    "x-api-key": self.claude_api_key,
+                    "anthropic-version": "2023-06-01"
+                }
+                
+                claude_response = await self.http_client.post(
+                    claude_url,
+                    headers=claude_headers,
+                    json=claude_payload
+                )
+                claude_response.raise_for_status()
+                claude_data = claude_response.json()
+                inference_time = time.perf_counter() - start_time
+                
+                # Extract response from Claude format
+                # Claude response has content as array: [{"type": "text", "text": "..."}]
+                raw_content = ""
+                if "content" in claude_data and isinstance(claude_data["content"], list):
+                    for content_block in claude_data["content"]:
+                        if content_block.get("type") == "text":
+                            raw_content += content_block.get("text", "")
+                
+                # Strip reasoning tags
+                cleaned_content = strip_reasoning_tags(raw_content)
+                
+                # Claude doesn't support response_format parameter like OpenAI
+                # So we always try to extract JSON from Claude responses when JSON is expected
+                # This handles cases where Claude returns JSON wrapped in markdown or with extra text
+                if response_format and response_format.get("type") == "json_object":
+                    extracted_json = extract_json_from_response(cleaned_content)
+                    if extracted_json != cleaned_content:
+                        cleaned_content = extracted_json
+                        logger.info(f"Claude: Extracted JSON from response (removed markdown/extra text)")
+                    else:
+                        # If extraction didn't change anything, the response might already be clean JSON
+                        # Try to validate it's actually JSON
+                        try:
+                            json.loads(cleaned_content)
+                            logger.debug(f"Claude: Response is already valid JSON")
+                        except json.JSONDecodeError:
+                            # Not valid JSON, log warning but keep original
+                            logger.warning(f"Claude: Could not extract valid JSON from response, returning as-is")
+                
+                # Extract usage information
+                usage = claude_data.get("usage", {})
+                total_tokens = usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
+                finish_reason = claude_data.get("stop_reason", "unknown")
+                
+                result = {
+                    "response": cleaned_content,
+                    "model": claude_data.get("model", self.model),
+                    "tokens_used": total_tokens,
+                    "finish_reason": finish_reason
+                }
+            else:
+                # OpenAI-compatible API call (OpenAI, vLLM, Chute)
+                logger.info(f"Calling {self.provider.upper()} API with model: {self.model}")
+                start_time = time.perf_counter()
+                response = await self.client.chat.completions.create(**params)
+                inference_time = time.perf_counter() - start_time
+                
+                # Extract response data
+                message = response.choices[0].message
+                raw_content = message.content or ""
+                
+                # Strip reasoning tags (like <think>...</think>)
+                cleaned_content = strip_reasoning_tags(raw_content)
+                
+                result = {
+                    "response": cleaned_content,
+                    "model": response.model,
+                    "tokens_used": response.usage.total_tokens,
+                    "finish_reason": response.choices[0].finish_reason
+                }
             
             # Log inference to file
             _log_inference(
                 provider=self.provider,
-                model=response.model,
+                model=result['model'],
                 tokens_used=result['tokens_used'],
                 inference_time=inference_time,
                 method="generate_response",
@@ -388,7 +678,7 @@ class LLMClient:
             # Save request and response messages if enabled
             _save_messages(
                 provider=self.provider,
-                model=response.model,
+                model=result['model'],
                 request_messages=messages,
                 response_content=cleaned_content,
                 method="generate_response"
@@ -398,7 +688,7 @@ class LLMClient:
             logger.info(f"Response: {result['response']}")
             return result
             
-        except OpenAIError as e:
+        except (OpenAIError, httpx.HTTPStatusError) as e:
             logger.error(f"{self.provider.upper()} API error: {str(e)}")
             raise
         except Exception as e:
@@ -604,20 +894,41 @@ class LLMClient:
             True if API is accessible, False otherwise
         """
         try:
-            # Simple test call
-            # GPT-5 uses max_completion_tokens
-            is_gpt5 = "gpt-5" in self.model.lower() or "o1" in self.model.lower()
-            test_params = {
-                "model": self.model,
-                "messages": [{"role": "user", "content": "test"}]
-            }
-            if is_gpt5:
-                test_params["max_completion_tokens"] = 5
+            if self.provider == "claude":
+                # Claude health check
+                claude_url = f"{self.claude_base_url}/messages"
+                claude_headers = {
+                    "Content-Type": "application/json",
+                    "x-api-key": self.claude_api_key,
+                    "anthropic-version": "2023-06-01"
+                }
+                claude_payload = {
+                    "model": self.model,
+                    "max_tokens": 5,
+                    "messages": [{"role": "user", "content": "test"}]
+                }
+                response = await self.http_client.post(
+                    claude_url,
+                    headers=claude_headers,
+                    json=claude_payload
+                )
+                response.raise_for_status()
+                return True
             else:
-                test_params["max_tokens"] = 5
-            
-            await self.client.chat.completions.create(**test_params)
-            return True
+                # OpenAI-compatible health check
+                # GPT-5 uses max_completion_tokens
+                is_gpt5 = "gpt-5" in self.model.lower() or "o1" in self.model.lower()
+                test_params = {
+                    "model": self.model,
+                    "messages": [{"role": "user", "content": "test"}]
+                }
+                if is_gpt5:
+                    test_params["max_completion_tokens"] = 5
+                else:
+                    test_params["max_tokens"] = 5
+                
+                await self.client.chat.completions.create(**test_params)
+                return True
         except Exception as e:
             logger.error(f"Health check failed: {str(e)}")
             return False

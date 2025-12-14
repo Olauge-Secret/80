@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     environment: str = "production"  # Default to production for security
     
     # LLM Provider Configuration
-    llm_provider: str = "openai"  # Options: "openai", "vllm", or "chute"
+    llm_provider: str = "openai"  # Options: "openai", "vllm", "chute", or "claude"
     
     # OpenAI Configuration
     openai_api_key: str = ""  # REQUIRED: Set in .env file
@@ -23,14 +23,19 @@ class Settings(BaseSettings):
     openai_base_url: Optional[str] = None  # Optional custom base URL
     
     # vLLM Configuration (for self-hosted models)
-    vllm_base_url: str = "http://localhost:8000/v1"  # vLLM server URL
-    vllm_model: str = "hugging-quants/Meta-Llama-3.1-8B-Instruct-AWQ-INT4"
+    vllm_base_url: str = "http://62.117.108.166:9050/v1"  # vLLM server URL
+    vllm_model: str = "Qwen/Qwen2.5-Math-7B"
     vllm_api_key: str = ""  # Set via VLLM_API_KEY if using vLLM
     
     # Chute Configuration
     chutes_api_key: str = ""  # REQUIRED: Set in .env file (comma-separated list supported)
-    chutes_model: str = "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"  # Chute model to use
+    chutes_model: str = "tngtech/DeepSeek-R1T-Chimera"  # Chute model to use
     chutes_base_url: str = "https://llm.chutes.ai/v1"  # Chute API base URL
+    
+    # Claude Configuration
+    anthropic_api_key: str = ""  # REQUIRED: Set in .env file as ANTHROPIC_API_KEY
+    claude_model: str = "claude-sonnet-4-5"  # Claude model to use
+    claude_base_url: str = "https://api.anthropic.com/v1"  # Claude API base URL
     
     # Model Configuration
     max_tokens: int = 4000
@@ -92,6 +97,8 @@ class Settings(BaseSettings):
             return self.vllm_model
         elif self.llm_provider == "chute":
             return self.chutes_model
+        elif self.llm_provider == "claude":
+            return self.claude_model
         return self.openai_model
     
     def get_chute_api_key(self) -> str:
