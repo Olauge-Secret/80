@@ -60,7 +60,7 @@ class Settings(BaseSettings):
     redis_host: str = "localhost"
     redis_port: int = 6379
     redis_db: int = 0
-    redis_solution_ttl: int = 120  # Solution TTL in seconds (2 minutes)
+    redis_solution_ttl: int = 50  # Solution TTL in seconds (50s < 60s request interval)
     redis_wait_timeout: int = 55  # Max time to wait for parent solution (55 seconds)
     
     # API Settings
