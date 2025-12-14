@@ -169,6 +169,11 @@ async def component_complete(
     """
     Complete component: Process tasks with optional conversation history and playbook.
     
+    Supports three miner types:
+    - parent: Solves with LLM and stores solution in Redis
+    - child: Waits for and fetches solution from Redis (no LLM call)
+    - normal: Solves with LLM independently (no Redis)
+    
     Args:
         component_input: Unified component input
         context: Conversation context with history
@@ -176,7 +181,48 @@ async def component_complete(
     Returns:
         ComponentOutput with the completed task
     """
-    logger.info(f"[complete] Processing task: {component_input.task}")
+    from src.core.config import settings
+    from src.utils.task_hash import generate_task_hash
+    
+    miner_type = settings.miner_type
+    logger.info(f"[complete] Processing task as {miner_type} miner: {component_input.task}")
+    
+    # Generate task hash for Redis key
+    task_hash = generate_task_hash(component_input.task, component_input.input)
+    logger.info(f"[complete] Task hash: {task_hash[:16]}...")
+    
+    # CHILD MINER: Wait for parent's solution in Redis
+    if miner_type == "child":
+        logger.info(f"[complete] Child miner waiting for parent solution...")
+        from src.services.redis_service import get_redis_service
+        
+        redis_service = get_redis_service()
+        if redis_service and redis_service.client:
+            # Wait for solution from parent
+            solution = await redis_service.wait_for_solution(
+                task_hash=task_hash,
+                timeout=settings.redis_wait_timeout
+            )
+            
+            if solution:
+                logger.info(f"[complete] ✅ Child received solution from parent")
+                # Return the parent's solution
+                return ComponentOutput(
+                    cid=component_input.cid,
+                    task=component_input.task,
+                    input=component_input.input,
+                    output=ComponentOutputData(
+                        immediate_response=solution.get("immediate_response", ""),
+                        notebook=solution.get("notebook", "no update")
+                    ),
+                    component="complete"
+                )
+            else:
+                logger.warning(f"[complete] ⏰ Timeout waiting for parent solution, falling back to LLM")
+                # Fall through to normal processing
+        else:
+            logger.error(f"[complete] ❌ Redis not available for child miner, falling back to LLM")
+            # Fall through to normal processing
     
     # Build input text from all input items
     input_text_parts = []
@@ -257,6 +303,31 @@ Complete this task and respond in JSON format."""
     # Store in conversation history
     await context.add_user_message(f"Task: {component_input.task}\n{input_text}")
     await context.add_assistant_message(immediate_response)
+    
+    # PARENT MINER: Store solution in Redis for children
+    if miner_type == "parent":
+        logger.info(f"[complete] Parent miner storing solution in Redis...")
+        from src.services.redis_service import get_redis_service
+        
+        redis_service = get_redis_service()
+        if redis_service and redis_service.client:
+            solution_data = {
+                "immediate_response": immediate_response,
+                "notebook": notebook_output
+            }
+            
+            success = await redis_service.store_solution(
+                task_hash=task_hash,
+                solution=solution_data,
+                ttl=settings.redis_solution_ttl
+            )
+            
+            if success:
+                logger.info(f"[complete] ✅ Parent stored solution in Redis")
+            else:
+                logger.warning(f"[complete] ⚠️ Failed to store solution in Redis")
+        else:
+            logger.warning(f"[complete] ⚠️ Redis not available for parent miner")
     
     return ComponentOutput(
         cid=component_input.cid,

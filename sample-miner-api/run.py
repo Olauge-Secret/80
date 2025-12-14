@@ -93,6 +93,13 @@ Examples:
         help="Save request and response messages to file (logs/messages.log)"
     )
     
+    parser.add_argument(
+        "--miner-type",
+        choices=["parent", "child", "normal"],
+        default="normal",
+        help="Miner type: parent (solves & shares via Redis), child (fetches from Redis), normal (independent)"
+    )
+    
     args = parser.parse_args()
     
     # Set LLM_PROVIDER environment variable based on argument
@@ -100,6 +107,9 @@ Examples:
     
     # Set SAVE_MESSAGES environment variable based on argument
     os.environ["SAVE_MESSAGES"] = "true" if args.save_messages else "false"
+    
+    # Set MINER_TYPE environment variable based on argument
+    os.environ["MINER_TYPE"] = args.miner_type
     
     # Check if database exists (it will be created automatically if missing)
     db_path = Path("./data/miner_api.db")
@@ -146,6 +156,7 @@ Examples:
     print(f"Mode:        {'Production' if args.production else 'Development'}")
     print(f"Auto-reload: {'Yes' if reload else 'No'}")
     print(f"Save messages: {'Yes' if args.save_messages else 'No'}")
+    print(f"Miner type:  {args.miner_type}")
     print(f"Database:    {db_path.absolute()}")
     print("=" * 60)
     print()

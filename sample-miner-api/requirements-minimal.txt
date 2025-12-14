@@ -21,6 +21,9 @@ python-dotenv==1.0.0
 httpx>=0.25.2
 requests>=2.31.0
 
+# Redis (for parent-child miner architecture)
+redis>=5.0.0
+
 # Optional: Web UI
 gradio>=4.7.1
 

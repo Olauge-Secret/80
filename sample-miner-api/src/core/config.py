@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     
     # OpenAI Configuration
     openai_api_key: str = ""  # REQUIRED: Set in .env file
-    openai_model: str = "gpt-5"  # Using GPT-5 (if not available, fallback to gpt-4o)
+    openai_model: str = "gpt-4.1"  # Using GPT-5 (if not available, fallback to gpt-4o)
     openai_base_url: Optional[str] = None  # Optional custom base URL
     
     # vLLM Configuration (for self-hosted models)
@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     
     # Chute Configuration
     chutes_api_key: str = ""  # REQUIRED: Set in .env file (comma-separated list supported)
-    chutes_model: str = "deepseek-ai/DeepSeek-V3-0324"  # Chute model to use
+    chutes_model: str = "deepseek-ai/DeepSeek-R1-0528-Qwen3-8B"  # Chute model to use
     chutes_base_url: str = "https://llm.chutes.ai/v1"  # Chute API base URL
     
     # Model Configuration
@@ -49,6 +49,14 @@ class Settings(BaseSettings):
     
     # Miner Configuration
     miner_name: str = "sample-miner"
+    miner_type: str = "normal"  # Options: "parent", "child", "normal"
+    
+    # Redis Configuration
+    redis_host: str = "localhost"
+    redis_port: int = 6379
+    redis_db: int = 0
+    redis_solution_ttl: int = 120  # Solution TTL in seconds (2 minutes)
+    redis_wait_timeout: int = 55  # Max time to wait for parent solution (55 seconds)
     
     # API Settings
     debug: bool = False

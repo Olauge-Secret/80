@@ -102,9 +102,23 @@ app.add_middleware(
 async def startup_event():
     """Initialize database tables on startup."""
     logger.info("🚀 Starting up Sample Miner API...")
+    logger.info(f"   Miner Type: {settings.miner_type}")
     try:
         create_db_and_tables()
         logger.info("✅ Database initialized successfully")
+        
+        # Initialize Redis if not running as normal miner
+        if settings.miner_type in ["parent", "child"]:
+            from src.services.redis_service import initialize_redis
+            try:
+                await initialize_redis()
+                logger.info(f"✅ Redis initialized for {settings.miner_type} miner")
+            except Exception as e:
+                logger.warning(f"⚠️ Redis initialization failed: {e}")
+                logger.warning(f"   {settings.miner_type.capitalize()} miner will not function properly without Redis")
+        else:
+            logger.info("   Redis not required for normal miner")
+            
     except Exception as e:
         logger.error(f"❌ Failed to initialize database: {e}")
         raise
@@ -116,6 +130,12 @@ async def shutdown_event():
     """Cleanup resources on shutdown."""
     logger.info("🛑 Shutting down Sample Miner API...")
     try:
+        # Close Redis connection
+        if settings.miner_type in ["parent", "child"]:
+            from src.services.redis_service import close_redis
+            await close_redis()
+            logger.info("✅ Redis connection closed")
+        
         # Close database connections
         from src.core.database import engine
         engine.dispose()

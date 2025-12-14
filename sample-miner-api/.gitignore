@@ -57,3 +57,5 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+
+ecosystem.config.js
