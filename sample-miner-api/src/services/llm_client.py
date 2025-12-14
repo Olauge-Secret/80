@@ -1,13 +1,14 @@
-"""LLM API client wrapper with support for OpenAI, vLLM, and Chute.
+"""LLM API client wrapper with support for OpenAI, vLLM, Chute, and Claude.
 
 This module provides a unified interface for interacting with Large Language Models
 through different providers:
 - OpenAI: Cloud-based API (GPT-4o, GPT-4-turbo, etc.)
 - vLLM: Self-hosted models (Llama, Qwen, Mistral, etc.)
 - Chute: Chute AI API (DeepSeek-R1, etc.)
+- Claude: Anthropic API (Claude Sonnet, etc.)
 
 The client automatically detects the provider from settings and provides
-an OpenAI-compatible interface for all.
+a unified interface for all providers.
 """
 
 import logging
@@ -293,8 +294,16 @@ class LLMClient:
             )
             logger.info(f"Initialized Chute client at {settings.chutes_base_url} with model: {self.model} (with connection pooling)")
         
+        elif self.provider == "claude":
+            # Claude uses Anthropic API (different from OpenAI)
+            self.client = None  # Claude uses httpx directly, not OpenAI client
+            self.http_client = http_client
+            self.claude_api_key = settings.anthropic_api_key
+            self.claude_base_url = settings.claude_base_url
+            logger.info(f"Initialized Claude client at {self.claude_base_url} with model: {self.model} (with connection pooling)")
+        
         else:
-            raise ValueError(f"Unsupported LLM provider: {self.provider}. Use 'openai', 'vllm', or 'chute'.")
+            raise ValueError(f"Unsupported LLM provider: {self.provider}. Use 'openai', 'vllm', 'chute', or 'claude'.")
     
     async def generate_response(
         self,
@@ -418,30 +427,108 @@ class LLMClient:
             # For vLLM, ensure we only send necessary fields (like openai and chute)
             # The params dict already only contains necessary fields, so no filtering needed
             
-            # Make API call with timing
-            logger.info(f"Calling {self.provider.upper()} API with model: {self.model}")
-            start_time = time.perf_counter()
-            response = await self.client.chat.completions.create(**params)
-            inference_time = time.perf_counter() - start_time
-            
-            # Extract response data
-            message = response.choices[0].message
-            raw_content = message.content or ""
-            
-            # Strip reasoning tags (like <think>...</think>)
-            cleaned_content = strip_reasoning_tags(raw_content)
-            
-            result = {
-                "response": cleaned_content,
-                "model": response.model,
-                "tokens_used": response.usage.total_tokens,
-                "finish_reason": response.choices[0].finish_reason
-            }
+            # Special handling for Claude API
+            if self.provider == "claude":
+                # Claude uses different API format
+                # Convert messages to Claude format
+                claude_messages = []
+                claude_system = None
+                
+                for msg in messages:
+                    role = msg.get("role", "user")
+                    content = msg.get("content", "")
+                    
+                    if role == "system":
+                        claude_system = content
+                    else:
+                        # Claude uses "user" and "assistant" roles
+                        claude_messages.append({
+                            "role": role if role in ["user", "assistant"] else "user",
+                            "content": content
+                        })
+                
+                # Prepare Claude API request
+                claude_payload = {
+                    "model": self.model,
+                    "max_tokens": max_tokens or settings.max_tokens,
+                    "messages": claude_messages
+                }
+                
+                if claude_system:
+                    claude_payload["system"] = claude_system
+                
+                if temperature is not None:
+                    claude_payload["temperature"] = temperature
+                else:
+                    claude_payload["temperature"] = settings.temperature
+                
+                # Make Claude API call
+                logger.info(f"Calling {self.provider.upper()} API with model: {self.model}")
+                start_time = time.perf_counter()
+                
+                claude_url = f"{self.claude_base_url}/messages"
+                claude_headers = {
+                    "Content-Type": "application/json",
+                    "x-api-key": self.claude_api_key,
+                    "anthropic-version": "2023-06-01"
+                }
+                
+                claude_response = await self.http_client.post(
+                    claude_url,
+                    headers=claude_headers,
+                    json=claude_payload
+                )
+                claude_response.raise_for_status()
+                claude_data = claude_response.json()
+                inference_time = time.perf_counter() - start_time
+                
+                # Extract response from Claude format
+                # Claude response has content as array: [{"type": "text", "text": "..."}]
+                raw_content = ""
+                if "content" in claude_data and isinstance(claude_data["content"], list):
+                    for content_block in claude_data["content"]:
+                        if content_block.get("type") == "text":
+                            raw_content += content_block.get("text", "")
+                
+                # Strip reasoning tags
+                cleaned_content = strip_reasoning_tags(raw_content)
+                
+                # Extract usage information
+                usage = claude_data.get("usage", {})
+                total_tokens = usage.get("input_tokens", 0) + usage.get("output_tokens", 0)
+                finish_reason = claude_data.get("stop_reason", "unknown")
+                
+                result = {
+                    "response": cleaned_content,
+                    "model": claude_data.get("model", self.model),
+                    "tokens_used": total_tokens,
+                    "finish_reason": finish_reason
+                }
+            else:
+                # OpenAI-compatible API call (OpenAI, vLLM, Chute)
+                logger.info(f"Calling {self.provider.upper()} API with model: {self.model}")
+                start_time = time.perf_counter()
+                response = await self.client.chat.completions.create(**params)
+                inference_time = time.perf_counter() - start_time
+                
+                # Extract response data
+                message = response.choices[0].message
+                raw_content = message.content or ""
+                
+                # Strip reasoning tags (like <think>...</think>)
+                cleaned_content = strip_reasoning_tags(raw_content)
+                
+                result = {
+                    "response": cleaned_content,
+                    "model": response.model,
+                    "tokens_used": response.usage.total_tokens,
+                    "finish_reason": response.choices[0].finish_reason
+                }
             
             # Log inference to file
             _log_inference(
                 provider=self.provider,
-                model=response.model,
+                model=result['model'],
                 tokens_used=result['tokens_used'],
                 inference_time=inference_time,
                 method="generate_response",
@@ -451,7 +538,7 @@ class LLMClient:
             # Save request and response messages if enabled
             _save_messages(
                 provider=self.provider,
-                model=response.model,
+                model=result['model'],
                 request_messages=messages,
                 response_content=cleaned_content,
                 method="generate_response"
@@ -461,7 +548,7 @@ class LLMClient:
             logger.info(f"Response: {result['response']}")
             return result
             
-        except OpenAIError as e:
+        except (OpenAIError, httpx.HTTPStatusError) as e:
             logger.error(f"{self.provider.upper()} API error: {str(e)}")
             raise
         except Exception as e:
@@ -667,20 +754,41 @@ class LLMClient:
             True if API is accessible, False otherwise
         """
         try:
-            # Simple test call
-            # GPT-5 uses max_completion_tokens
-            is_gpt5 = "gpt-5" in self.model.lower() or "o1" in self.model.lower()
-            test_params = {
-                "model": self.model,
-                "messages": [{"role": "user", "content": "test"}]
-            }
-            if is_gpt5:
-                test_params["max_completion_tokens"] = 5
+            if self.provider == "claude":
+                # Claude health check
+                claude_url = f"{self.claude_base_url}/messages"
+                claude_headers = {
+                    "Content-Type": "application/json",
+                    "x-api-key": self.claude_api_key,
+                    "anthropic-version": "2023-06-01"
+                }
+                claude_payload = {
+                    "model": self.model,
+                    "max_tokens": 5,
+                    "messages": [{"role": "user", "content": "test"}]
+                }
+                response = await self.http_client.post(
+                    claude_url,
+                    headers=claude_headers,
+                    json=claude_payload
+                )
+                response.raise_for_status()
+                return True
             else:
-                test_params["max_tokens"] = 5
-            
-            await self.client.chat.completions.create(**test_params)
-            return True
+                # OpenAI-compatible health check
+                # GPT-5 uses max_completion_tokens
+                is_gpt5 = "gpt-5" in self.model.lower() or "o1" in self.model.lower()
+                test_params = {
+                    "model": self.model,
+                    "messages": [{"role": "user", "content": "test"}]
+                }
+                if is_gpt5:
+                    test_params["max_completion_tokens"] = 5
+                else:
+                    test_params["max_tokens"] = 5
+                
+                await self.client.chat.completions.create(**test_params)
+                return True
         except Exception as e:
             logger.error(f"Health check failed: {str(e)}")
             return False
