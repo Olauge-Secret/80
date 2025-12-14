@@ -194,6 +194,128 @@ def estimate_tokens(text: str) -> int:
     return len(text) // 3
 
 
+def extract_json_from_response(text: str) -> str:
+    """
+    Extract JSON from response text, handling markdown code blocks and extra text.
+    
+    This function tries to find and extract valid JSON from a response that may contain:
+    - Markdown code blocks (```json ... ```)
+    - Extra text before/after JSON
+    - Reasoning or explanation text
+    
+    Args:
+        text: Response text that may contain JSON
+        
+    Returns:
+        Extracted JSON string, or original text if no JSON found
+    """
+    if not text:
+        return text
+    
+    text = text.strip()
+    
+    # Strategy 1: Try to find JSON in markdown code blocks (```json ... ```)
+    if "```json" in text:
+        start_idx = text.find("```json")
+        if start_idx != -1:
+            # Find the start of JSON content (after ```json and optional newline)
+            content_start = text.find("\n", start_idx + 7)
+            if content_start == -1:
+                content_start = start_idx + 7
+            else:
+                content_start += 1  # Skip the newline
+            
+            # Find the closing ```
+            end_idx = text.find("```", content_start)
+            if end_idx != -1:
+                json_part = text[content_start:end_idx].strip()
+                # Validate it's JSON
+                try:
+                    json.loads(json_part)
+                    return json_part
+                except json.JSONDecodeError:
+                    pass
+    
+    # Strategy 2: Try to find any code block that might contain JSON
+    if "```" in text:
+        # Find all code blocks
+        parts = text.split("```")
+        for i in range(1, len(parts), 2):  # Check every other part (code blocks)
+            if i >= len(parts):
+                break
+            try:
+                code_block = parts[i].strip()
+                # Remove language identifier if present (json, json\n, etc.)
+                if code_block.startswith("json"):
+                    # Find first newline after "json"
+                    nl_idx = code_block.find("\n")
+                    if nl_idx != -1:
+                        code_block = code_block[nl_idx + 1:].strip()
+                    else:
+                        code_block = code_block[4:].strip()
+                # Try to parse as JSON
+                parsed = json.loads(code_block)
+                # Validate it's an object with expected fields
+                if isinstance(parsed, dict) and ("immediate_response" in parsed or "notebook" in parsed):
+                    return code_block
+            except (json.JSONDecodeError, IndexError, ValueError):
+                continue
+    
+    # Strategy 3: Try to find last complete JSON object (most likely to be the actual response
+    # if there's reasoning text before it)
+    last_brace = text.rfind("}")
+    if last_brace != -1 and last_brace > 0:
+        # Work backwards to find matching opening brace
+        brace_count = 0
+        start_idx = -1
+        for i in range(last_brace, -1, -1):
+            if text[i] == "}":
+                brace_count += 1
+            elif text[i] == "{":
+                brace_count -= 1
+                if brace_count == 0:
+                    start_idx = i
+                    break
+        
+        if start_idx != -1:
+            json_candidate = text[start_idx:last_brace+1]
+            try:
+                parsed = json.loads(json_candidate)
+                # Validate it's an object with expected fields
+                if isinstance(parsed, dict) and ("immediate_response" in parsed or "notebook" in parsed):
+                    return json_candidate
+            except json.JSONDecodeError:
+                pass
+    
+    # Strategy 4: Try to find first complete JSON object (fallback)
+    first_brace = text.find("{")
+    if first_brace != -1:
+        # Find matching closing brace
+        brace_count = 0
+        end_idx = -1
+        for i in range(first_brace, len(text)):
+            if text[i] == "{":
+                brace_count += 1
+            elif text[i] == "}":
+                brace_count -= 1
+                if brace_count == 0:
+                    end_idx = i
+                    break
+        
+        if end_idx != -1:
+            json_candidate = text[first_brace:end_idx+1]
+            try:
+                parsed = json.loads(json_candidate)
+                # Validate it's an object with expected fields
+                if isinstance(parsed, dict) and ("immediate_response" in parsed or "notebook" in parsed):
+                    return json_candidate
+            except json.JSONDecodeError:
+                pass
+    
+    # If no JSON found, return original text
+    return text
+
+
 def strip_reasoning_tags(text: str) -> str:
     """
     Remove reasoning/thinking tags from LLM responses.
@@ -492,6 +614,24 @@ class LLMClient:
                 
                 # Strip reasoning tags
                 cleaned_content = strip_reasoning_tags(raw_content)
+                
+                # Claude doesn't support response_format parameter like OpenAI
+                # So we always try to extract JSON from Claude responses when JSON is expected
+                # This handles cases where Claude returns JSON wrapped in markdown or with extra text
+                if response_format and response_format.get("type") == "json_object":
+                    extracted_json = extract_json_from_response(cleaned_content)
+                    if extracted_json != cleaned_content:
+                        cleaned_content = extracted_json
+                        logger.info(f"Claude: Extracted JSON from response (removed markdown/extra text)")
+                    else:
+                        # If extraction didn't change anything, the response might already be clean JSON
+                        # Try to validate it's actually JSON
+                        try:
+                            json.loads(cleaned_content)
+                            logger.debug(f"Claude: Response is already valid JSON")
+                        except json.JSONDecodeError:
+                            # Not valid JSON, log warning but keep original
+                            logger.warning(f"Claude: Could not extract valid JSON from response, returning as-is")
                 
                 # Extract usage information
                 usage = claude_data.get("usage", {})
